@@ -243,6 +243,14 @@ public enum ToolCatalog {
 
             Requires confirm=true whenever a file already exists at the destination: \
             this overwrites it, and this server cannot undo that.
+
+            Redirecting an already-saved document to a NEW path is where Pages' own \
+            "save" command is least reliable — verified live: it can report success \
+            while writing nothing at all. This server checks the destination file \
+            actually exists afterwards and reports a failure honestly when it does not, \
+            but if this call keeps failing for a document that already has a location, \
+            export_document (format pages09) is the more reliable way to get a copy onto \
+            disk at a new path.
             """,
         inputSchema: object(
             properties: [
@@ -283,19 +291,29 @@ public enum ToolCatalog {
         name: exportName,
         title: "Export a document",
         description: """
-            Exports an open document to 'to' in 'format' — one of pdf, word, epub, rtf, \
-            plain_text or pages09.
+            Exports an open document to 'to' in 'format'. 'to' MUST end in the extension \
+            Pages itself expects for that format — anything else fails silently, with no \
+            error and no file:
 
-            Pages' own sandbox only accepts destinations under Desktop, Documents or \
-            Downloads (or another folder separately granted); a path outside that is \
-            refused by Pages itself and reported as such.
+              pdf         .pdf
+              word        .docx
+              epub        .epub
+              rtf         .rtf
+              plain_text  .txt
+              pages09     .pages
+
+            An unusual or inaccessible destination is refused and reported rather than \
+            silently rerouted — this server checks the file actually exists afterwards, \
+            not just that Pages returned no error.
 
             Requires confirm=true whenever a file already exists at the destination.
             """,
         inputSchema: object(
             properties: [
                 "id": string(idHelp),
-                "to": string("Destination POSIX path, including the file extension."),
+                "to": string(
+                    "Destination POSIX path, ending in the extension the chosen format "
+                        + "requires (see above) — a mismatched extension is refused."),
                 "format": .object([
                     "type": .string("string"),
                     "enum": .array(

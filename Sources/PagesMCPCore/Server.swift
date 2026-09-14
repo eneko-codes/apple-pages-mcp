@@ -47,6 +47,18 @@ public enum PagesMCPServer {
         This server has no delete tool of any kind — removing a document from disk is \
         the filesystem server's job, not this one's.
 
+        A document's id can change on its own while it stays open — observed live, right \
+        after a save. If a call reports "no open document has that id", call \
+        documents_list again before assuming it closed.
+
+        save_document redirecting an already-saved document to a NEW path is unreliable \
+        in Pages itself — it can report success while writing nothing. This server \
+        checks the file actually landed and fails honestly when it did not; \
+        export_document (format pages09) is the more dependable way to get a copy onto \
+        disk at a new path. export_document's destination must end in the extension the \
+        chosen format expects (see its own description) — Pages silently writes nothing \
+        for a mismatch, same as save.
+
         This server exposes Pages' full scriptable capability. What may be used at any \
         moment is decided by the permission switches in the client, not by this code.
         """

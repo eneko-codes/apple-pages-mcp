@@ -26,6 +26,49 @@ Pages ships no framework an external process can use, so everything is an Apple 
 
 **One thing Pages needed that Notes did not.** Pages' `body text` is declared in its own dictionary as a "rich text" object, not as plain text — confirmed by generating the real `sdp`-produced header (`sdef "/Applications/Pages Creator Studio.app" | sdp -fh`) and by a standalone Objective-C probe against the running app: declaring the property `NSString *` in a hand-written protocol does **not** coerce it, it still comes back as an opaque `SBObject`. Reading it as text needs the same coercion AppleScript's `as text` performs — a `core`/`getd` Apple event carrying a `keyAERequestedType` parameter of `typeUnicodeText`, sent explicitly with `SBObject`'s public `sendEvent:id:parameters:`. See the comment above `plainText:` in `PagesBridge.m`.
 
+## Scripting Bridge quirks found by live verification, not by reasoning about it
+
+Two real bugs surfaced only once this server was actually run against real Pages —
+neither is reachable through `FakePageStore`, and both are worth knowing before touching
+`PagesBridge.m` again.
+
+**A `filteredArrayUsingPredicate:` result crashes if you read a property off it before
+`-get`.** `documentWithIdentifier:ofApplication:` finds a document with `[application.documents
+filteredArrayUsingPredicate:...]`. The result's `firstObject` is a lazy "whose" specifier —
+its own `-description` prints `whose 'cmpd'{...}`, not a resolved element — and calling
+`-id` (or any property) on it directly crashed inside `objc_retain` with `EXC_BAD_ACCESS`.
+Reproduced in a standalone single-threaded `main()` with no Swift and no concurrency
+involved, ruling out a threading cause before that theory got anywhere. `SBObject.get` —
+"forces the current object reference... to be evaluated" — resolves it to a concrete
+element first; every property read is reliable after that. The fix is the two lines at the
+end of `documentWithIdentifier:ofApplication:`; do not remove them to "simplify" the method.
+
+**`saveIn:as:` and `exportTo:as:` can report success while writing nothing at all.**
+Verified twice, independently: redirecting an already-saved document to a new path via the
+Objective-C bridge returned with no exception and no `lastError`, left the destination file
+absent, and left `document.file` unchanged — and the identical operation via plain
+AppleScript (`save d in (POSIX file "...") as Pages format`) threw "AppleEvent handler
+failed" for the same document, so this is Pages' own command being unreliable, not a bridge
+bug. `saveDocumentWithIdentifier:...` and `exportDocumentWithIdentifier:...` both verify the
+destination file actually exists afterwards and raise `PagesBridgeErrorWriteRefused`
+explicitly when it does not, rather than trusting the command's own silence. Do not remove
+that check to "trust the framework" — it is the only thing standing between a caller and a
+false "saved" receipt.
+
+A related, narrower case: a **never-saved** document's first save to a path can instead
+*hang* rather than no-op — one real run took the underlying AppleEvent all the way to its
+timeout (Pages' own default, measured at ~120s) before failing. `applicationWithError:` sets
+`application.timeout = 30 * 60` (ticks, not seconds) for exactly this reason: a stuck call
+should fail with a clear message well before it blocks a whole tool call for two minutes.
+`close_document` refuses `saving=true` on a never-saved document outright for the same
+underlying risk; `save_document`'s first-save case is only bounded by the timeout, not
+closed off, because refusing it outright would remove the tool's main reason to exist.
+
+**A document's own `id` is not stable for the life of its window.** Observed live: the same
+open document (same window, same content) returned a different `id` from `documents_list`
+after being saved. `ToolError.notFound`'s message says so; do not "fix" a test or a bug
+report that assumes an id is a permanent handle the way it would be for a database row.
+
 ## Native surface not used
 
 `sdef "/Applications/Pages Creator Studio.app"` is the authority on what is possible here — or generate the real Objective-C header with `sdp -fh` before hand-declaring a new protocol member, and check it against the running app the way the comment at the top of `PagesBridge.m` describes.

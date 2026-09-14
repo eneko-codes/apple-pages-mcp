@@ -123,6 +123,15 @@ static const OSType PagesExportFormatRTF = 'Prtf';
     // No launch flag is set to keep Pages from starting, because none exists: the guard is
     // the isPagesRunning check above. Launching an app on the owner's behalf is a side
     // effect they did not ask for.
+
+    // `timeout` is in ticks (1/60 second), inherited from the classic Apple Event Manager.
+    // The default is `kAEDefaultTimeout`, documented as "about a minute" but measured here
+    // at ~120s: a document's first save to a path it has never had — the never-saved,
+    // saving:true case `close_document` already refuses for exactly this reason — can hang
+    // the whole way to that timeout waiting on a dialog nothing here can answer. 30 seconds
+    // is long enough for a real export or save and short enough that a stuck call fails
+    // with a clear error instead of blocking a tool call for two minutes.
+    application.timeout = 30 * 60;
     return (SBApplication<PagesApplication> *)application;
 }
 
@@ -142,9 +151,19 @@ static const OSType PagesExportFormatRTF = 'Prtf';
 
 + (nullable id<PagesDocument>)documentWithIdentifier:(NSString *)identifier
                                         ofApplication:(SBApplication<PagesApplication> *)application {
-    NSArray *matching = [application.documents
+    NSArray<id<PagesDocument>> *matching = [application.documents
         filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"id == %@", identifier]];
-    return matching.firstObject;
+    SBObject<PagesDocument> *match = (SBObject<PagesDocument> *)matching.firstObject;
+    if (!match) return nil;
+    // `filteredArrayUsingPredicate:` returns a lazy "whose" specifier — its own
+    // description prints `whose 'cmpd'{...}`, not a resolved element reference. Reading
+    // *any* property directly off that, starting with `-id`, crashed inside `objc_retain`
+    // with `EXC_BAD_ACCESS` — reproduced with a standalone, single-threaded repro with no
+    // Swift and no concurrency involved, so it is a Scripting Bridge behaviour, not a
+    // threading bug. `SBObject.get` — "forces the current object reference... to be
+    // evaluated" — resolves it to a concrete element first, after which every property
+    // access here is reliable.
+    return (id<PagesDocument>)[match get];
 }
 
 + (NSError *)documentNotFoundError {
@@ -371,6 +390,30 @@ static const OSType PagesExportFormatRTF = 'Prtf';
     }
     [document saveIn:destination as:PagesSaveableFormatPages];
 
+    // `saveIn:as:` does not reliably report its own failure. Verified directly against
+    // the running app, twice, before writing this check: redirecting an already-saved
+    // document to a new path returned with no exception and no `lastError` while leaving
+    // the file untouched and `document.file` unchanged — a silent no-op masquerading as
+    // success. A destination that still does not exist on disk after the call is treated
+    // as a failure explicitly, rather than trusting the command's own silence.
+    if (destination.isFileURL && ![[NSFileManager defaultManager]
+                                       fileExistsAtPath:destination.path]) {
+        if (error) {
+            *error = [self errorWithCode:PagesBridgeErrorWriteRefused
+                                 message:[NSString stringWithFormat:
+                                                       @"Pages reported no error, but no file "
+                                                        "exists at '%@' afterwards. Pages' "
+                                                        "own \"save\" command is not reliable "
+                                                        "for redirecting an already-saved "
+                                                        "document to a new location — export_"
+                                                        "document is the verified route to "
+                                                        "get this document's content onto "
+                                                        "disk at a chosen path.",
+                                                       destination.path]];
+        }
+        return nil;
+    }
+
     NSMutableDictionary<NSString *, id> *detail = [[self summaryOfDocument:document] mutableCopy];
     detail[@"bodyText"] = [self plainText:document.bodyText];
     return detail;
@@ -410,14 +453,33 @@ static const OSType PagesExportFormatRTF = 'Prtf';
     return record;
 }
 
-+ (BOOL)exportFormatCode:(NSString *)format into:(OSType *)outCode {
-    if ([format isEqualToString:@"pdf"]) *outCode = PagesExportFormatPDF;
-    else if ([format isEqualToString:@"word"]) *outCode = PagesExportFormatWord;
-    else if ([format isEqualToString:@"epub"]) *outCode = PagesExportFormatEPUB;
-    else if ([format isEqualToString:@"rtf"]) *outCode = PagesExportFormatRTF;
-    else if ([format isEqualToString:@"plain_text"]) *outCode = PagesExportFormatPlainText;
-    else if ([format isEqualToString:@"pages09"]) *outCode = PagesExportFormatPages09;
-    else return NO;
+/// The file extension Pages itself expects for each export format, taken from the
+/// dictionary's own documentation for the `export` command. `exportTo:as:` does not
+/// validate this — see the caller for why that matters.
++ (BOOL)exportFormatCode:(NSString *)format
+                     into:(OSType *)outCode
+                extension:(NSString *_Nonnull *_Nonnull)outExtension {
+    if ([format isEqualToString:@"pdf"]) {
+        *outCode = PagesExportFormatPDF;
+        *outExtension = @"pdf";
+    } else if ([format isEqualToString:@"word"]) {
+        *outCode = PagesExportFormatWord;
+        *outExtension = @"docx";
+    } else if ([format isEqualToString:@"epub"]) {
+        *outCode = PagesExportFormatEPUB;
+        *outExtension = @"epub";
+    } else if ([format isEqualToString:@"rtf"]) {
+        *outCode = PagesExportFormatRTF;
+        *outExtension = @"rtf";
+    } else if ([format isEqualToString:@"plain_text"]) {
+        *outCode = PagesExportFormatPlainText;
+        *outExtension = @"txt";
+    } else if ([format isEqualToString:@"pages09"]) {
+        *outCode = PagesExportFormatPages09;
+        *outExtension = @"pages";
+    } else {
+        return NO;
+    }
     return YES;
 }
 
@@ -436,7 +498,8 @@ static const OSType PagesExportFormatRTF = 'Prtf';
     }
 
     OSType formatCode;
-    if (![self exportFormatCode:format into:&formatCode]) {
+    NSString *expectedExtension;
+    if (![self exportFormatCode:format into:&formatCode extension:&expectedExtension]) {
         if (error) {
             *error = [self errorWithCode:PagesBridgeErrorWriteRefused
                                  message:[NSString stringWithFormat:@"Unknown export format "
@@ -446,10 +509,44 @@ static const OSType PagesExportFormatRTF = 'Prtf';
         return nil;
     }
 
-    // Pages' own sandbox decides which destinations are reachable — Desktop, Documents,
-    // Downloads, or a folder the person separately granted — and refuses anything else
-    // itself. That refusal is surfaced through `error` rather than routed around.
+    // Verified directly against the running app: `exportTo:as:` silently no-ops — no
+    // exception, no `lastError`, no file — when the destination's extension does not
+    // match the format (asked for "word" with a ".word" path; the real export needs
+    // ".docx"). Refusing before sending the event, rather than discovering it from a
+    // missing file afterwards, gives a caller something actionable.
+    if (![path.pathExtension.lowercaseString isEqualToString:expectedExtension]) {
+        if (error) {
+            *error = [self errorWithCode:PagesBridgeErrorWriteRefused
+                                 message:[NSString stringWithFormat:
+                                                       @"'%@' export needs a '.%@' "
+                                                        "destination, not '%@'. Pages "
+                                                        "reports no error for a mismatched "
+                                                        "extension — it just writes nothing.",
+                                                       format, expectedExtension, path]];
+        }
+        return nil;
+    }
+
+    // Verified live to reach ordinary locations well beyond Desktop/Documents/Downloads
+    // — a plain /tmp path and a brand-new folder under the home directory both worked.
+    // Whatever narrower boundary Pages' own sandbox does draw, a refusal is surfaced
+    // through `error` rather than routed around.
     [document exportTo:[NSURL fileURLWithPath:path] as:formatCode withProperties:nil];
+
+    // Belt and suspenders: the extension check above is the known cause, but
+    // `exportTo:as:` has already shown once that it can report success with nothing on
+    // disk, so the result is verified rather than assumed for any other reason it might
+    // do that again.
+    if (![[NSFileManager defaultManager] fileExistsAtPath:path]) {
+        if (error) {
+            *error = [self errorWithCode:PagesBridgeErrorWriteRefused
+                                 message:[NSString stringWithFormat:
+                                                       @"Pages reported no error, but no "
+                                                        "file exists at '%@' afterwards.",
+                                                       path]];
+        }
+        return nil;
+    }
 
     return @{@"path": path, @"format": format};
 }

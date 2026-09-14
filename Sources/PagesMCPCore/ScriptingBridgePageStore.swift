@@ -107,6 +107,22 @@ public struct ScriptingBridgePageStore: PageStore {
             pageTexts: raw["pageTexts"] as? [String])
     }
 
+    /// One dictionary per paragraph, in the exact shape `PagesBridge.applyStyledParagraphs`
+    /// expects. The `ParagraphStyle → preset` mapping is the policy this seam exists to
+    /// keep out of the bridge; this is where it actually happens.
+    private func bridgeParagraphs(from paragraphs: [StyledParagraph]) -> [[String: Any]] {
+        paragraphs.map { paragraph in
+            let preset = paragraph.style.preset
+            var spec: [String: Any] = ["text": paragraph.text, "font": preset.font, "size": preset.size]
+            if let color = preset.color {
+                spec["colorRed"] = color.red
+                spec["colorGreen"] = color.green
+                spec["colorBlue"] = color.blue
+            }
+            return spec
+        }
+    }
+
     // MARK: Reads
 
     public func documents() async throws -> [DocumentSummary] {
@@ -151,8 +167,14 @@ public struct ScriptingBridgePageStore: PageStore {
         try guardAvailability()
         let raw: [String: Any]
         do {
-            raw = try PagesBridge.createDocument(
-                withTemplateName: draft.templateName, initialBodyText: draft.initialBodyText)
+            if let paragraphs = draft.paragraphs {
+                raw = try PagesBridge.createDocument(
+                    withTemplateName: draft.templateName,
+                    styledParagraphs: bridgeParagraphs(from: paragraphs))
+            } else {
+                raw = try PagesBridge.createDocument(
+                    withTemplateName: draft.templateName, initialBodyText: draft.initialBodyText)
+            }
         } catch { throw storeFailure(error) }
         return detail(from: raw)
     }
@@ -169,6 +191,22 @@ public struct ScriptingBridgePageStore: PageStore {
         let raw: [String: Any]
         do {
             raw = try PagesBridge.setBodyText(text, ofDocumentWithIdentifier: identifier)
+        } catch where isDocumentMissing(error) {
+            throw ToolError.notFound(identifier: identifier)
+        } catch {
+            throw storeFailure(error)
+        }
+        return detail(from: raw)
+    }
+
+    public func replaceStyledParagraphs(identifier: String, paragraphs: [StyledParagraph])
+        async throws -> DocumentDetail
+    {
+        try guardAvailability()
+        let raw: [String: Any]
+        do {
+            raw = try PagesBridge.setStyledParagraphs(
+                bridgeParagraphs(from: paragraphs), ofDocumentWithIdentifier: identifier)
         } catch where isDocumentMissing(error) {
             throw ToolError.notFound(identifier: identifier)
         } catch {

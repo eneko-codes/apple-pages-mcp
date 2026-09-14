@@ -40,6 +40,28 @@
 @property (copy, readonly) id bodyText;
 @end
 
+/// One paragraph of rich text. Font, size and color are the entire scriptable surface —
+/// verified against the running app, including the surprising part: setting them works
+/// directly on the indexed specifier `richText.paragraphs[i]` with no `.get` resolution
+/// first. That is the opposite of `documentWithIdentifier:ofApplication:`'s lesson, not a
+/// contradiction of it — `.get` on a paragraph eagerly coerces to its own plain-text
+/// `NSString` (also verified live), so calling it here would hand back a string with no
+/// `font`/`size`/`color` properties at all, and setting one would crash the same way the
+/// unresolved document specifier did before that fix, just further down the stack.
+@protocol PagesRichTextParagraph <NSObject>
+@property (copy) NSString *font;
+@property double size;
+@property (copy) NSColor *color;
+@end
+
+/// `document.bodyText`'s type once you need to reach into it — declared separately from
+/// the `id` used elsewhere for `bodyText` because Swift-side coercion (`plainText:`) and
+/// paragraph access are different operations needing different static types on the same
+/// underlying Apple-event value.
+@protocol PagesRichText <NSObject>
+@property (readonly) SBElementArray<id<PagesRichTextParagraph>> *paragraphs;
+@end
+
 @protocol PagesSection <NSObject>
 @property (copy, readonly) id bodyText;
 @end
@@ -245,13 +267,13 @@ static const OSType PagesExportFormatRTF = 'Prtf';
 
 #pragma mark - Writes
 
-+ (nullable NSDictionary<NSString *, id> *)
-    createDocumentWithTemplateName:(nullable NSString *)templateName
-                    initialBodyText:(nullable NSString *)bodyText
-                              error:(NSError **)error {
-    SBApplication<PagesApplication> *application = [self applicationWithError:error];
-    if (!application) return nil;
-
+/// The half of document creation shared by the plain-body and styled-paragraph forms:
+/// resolve the template if one was named, ask for the document class, create it, and
+/// insert it into `application.documents`. Returns the still-untitled document with an
+/// empty body; the caller sets `bodyText` afterwards, once, in whichever shape it needs.
++ (nullable id<PagesDocument>)insertedDocumentWithTemplateName:(nullable NSString *)templateName
+                                             ofApplication:(SBApplication<PagesApplication> *)application
+                                                     error:(NSError **)error {
     NSDictionary *properties = @{};
     if (templateName.length > 0) {
         id<PagesTemplate> match;
@@ -295,6 +317,57 @@ static const OSType PagesExportFormatRTF = 'Prtf';
     // the application until it has been added to its container. Consequently, you cannot
     // set or access its properties until it's been added."
     [application.documents addObject:document];
+    return document;
+}
+
+/// Splits `text` on `\n` into Pages paragraphs and applies `font`/`size` and, when all
+/// three color keys are present, `color` to each, by index — the entire scriptable
+/// surface of a rich-text paragraph, confirmed against the running app. `paragraphs`
+/// carries one dictionary per paragraph, in order: `{"text", "font", "size", "colorRed",
+/// "colorGreen", "colorBlue"}` (the color keys are all-or-nothing per paragraph — absent
+/// means leave Pages' own default color alone). The count of paragraphs actually present
+/// afterward is trusted over `paragraphs.count`: a caller whose own text contains an
+/// embedded `\n` would otherwise walk off the end of what Pages actually made.
++ (void)applyStyledParagraphs:(NSArray<NSDictionary<NSString *, id> *> *)paragraphs
+                    toDocument:(id<PagesDocument>)document {
+    NSMutableArray<NSString *> *texts = [NSMutableArray arrayWithCapacity:paragraphs.count];
+    for (NSDictionary<NSString *, id> *spec in paragraphs) {
+        [texts addObject:spec[@"text"] ?: @""];
+    }
+    document.bodyText = [texts componentsJoinedByString:@"\n"];
+
+    id<PagesRichText> richText = (id<PagesRichText>)document.bodyText;
+    SBElementArray<id<PagesRichTextParagraph>> *richParagraphs = richText.paragraphs;
+    NSUInteger count = MIN(paragraphs.count, richParagraphs.count);
+    for (NSUInteger i = 0; i < count; i++) {
+        NSDictionary<NSString *, id> *spec = paragraphs[i];
+        // Never resolved with `.get` — see the note on `PagesRichTextParagraph` above.
+        id<PagesRichTextParagraph> paragraph = [richParagraphs objectAtIndex:i];
+        NSString *font = spec[@"font"];
+        NSNumber *size = spec[@"size"];
+        if (font.length > 0) paragraph.font = font;
+        if (size) paragraph.size = size.doubleValue;
+        NSNumber *red = spec[@"colorRed"], *green = spec[@"colorGreen"], *blue = spec[@"colorBlue"];
+        if (red && green && blue) {
+            paragraph.color = [NSColor colorWithCalibratedRed:red.doubleValue
+                                                          green:green.doubleValue
+                                                           blue:blue.doubleValue
+                                                          alpha:1.0];
+        }
+    }
+}
+
++ (nullable NSDictionary<NSString *, id> *)
+    createDocumentWithTemplateName:(nullable NSString *)templateName
+                    initialBodyText:(nullable NSString *)bodyText
+                              error:(NSError **)error {
+    SBApplication<PagesApplication> *application = [self applicationWithError:error];
+    if (!application) return nil;
+
+    id<PagesDocument> document = [self insertedDocumentWithTemplateName:templateName
+                                                      ofApplication:application
+                                                              error:error];
+    if (!document) return nil;
 
     if (bodyText.length > 0) {
         document.bodyText = bodyText;
@@ -313,6 +386,36 @@ static const OSType PagesExportFormatRTF = 'Prtf';
 
     NSMutableDictionary<NSString *, id> *detail = [[self summaryOfDocument:document] mutableCopy];
     detail[@"bodyText"] = bodyText ?: @"";
+    return detail;
+}
+
++ (nullable NSDictionary<NSString *, id> *)
+    createDocumentWithTemplateName:(nullable NSString *)templateName
+                   styledParagraphs:(NSArray<NSDictionary<NSString *, id> *> *)paragraphs
+                              error:(NSError **)error {
+    SBApplication<PagesApplication> *application = [self applicationWithError:error];
+    if (!application) return nil;
+
+    id<PagesDocument> document = [self insertedDocumentWithTemplateName:templateName
+                                                      ofApplication:application
+                                                              error:error];
+    if (!document) return nil;
+
+    NSString *identifier = [document id];
+    if (identifier.length == 0) {
+        if (error) {
+            *error = [self errorWithCode:PagesBridgeErrorCreateRefused
+                                 message:@"Pages created the document but did not return an "
+                                          "identifier for it. Check documents_list before "
+                                          "trying again, so a second copy is not made."];
+        }
+        return nil;
+    }
+
+    [self applyStyledParagraphs:paragraphs toDocument:document];
+
+    NSMutableDictionary<NSString *, id> *detail = [[self summaryOfDocument:document] mutableCopy];
+    detail[@"bodyText"] = [self plainText:document.bodyText];
     return detail;
 }
 
@@ -360,6 +463,26 @@ static const OSType PagesExportFormatRTF = 'Prtf';
         return nil;
     }
     document.bodyText = text;
+
+    NSMutableDictionary<NSString *, id> *detail = [[self summaryOfDocument:document] mutableCopy];
+    detail[@"bodyText"] = [self plainText:document.bodyText];
+    return detail;
+}
+
++ (nullable NSDictionary<NSString *, id> *)
+    setStyledParagraphs:(NSArray<NSDictionary<NSString *, id> *> *)paragraphs
+    ofDocumentWithIdentifier:(NSString *)identifier
+                        error:(NSError **)error {
+    SBApplication<PagesApplication> *application = [self applicationWithError:error];
+    if (!application) return nil;
+
+    id<PagesDocument> document = [self documentWithIdentifier:identifier ofApplication:application];
+    if (!document) {
+        if (error) *error = [self documentNotFoundError];
+        return nil;
+    }
+
+    [self applyStyledParagraphs:paragraphs toDocument:document];
 
     NSMutableDictionary<NSString *, id> *detail = [[self summaryOfDocument:document] mutableCopy];
     detail[@"bodyText"] = [self plainText:document.bodyText];

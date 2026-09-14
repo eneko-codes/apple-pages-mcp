@@ -21,9 +21,9 @@ Not affiliated with or endorsed by Apple Inc.
 | `pages_status` | read | Availability, Automation permission, configured limits |
 | `documents_list` | read | Every document currently open in Pages |
 | `document_get` | read | One open document's body text and structure |
-| `create_document` | write | New document, optional template, optional initial body |
+| `create_document` | write | New document, optional template, initial body as plain text or styled paragraphs |
 | `open_document` | write | Opens an existing `.pages` file by path |
-| `update_document` | write | Append to or replace a document's body |
+| `update_document` | write | Append (plain text) or replace (plain text or styled paragraphs) a document's body |
 | `save_document` | write | Save, in place or to a new path |
 | `close_document` | **destructive** | Close, discarding changes by default |
 | `export_document` | write | Export to PDF, Word, EPUB, RTF, plain text or Pages '09 |
@@ -31,7 +31,8 @@ Not affiliated with or endorsed by Apple Inc.
 ## The rules worth knowing before you use it
 
 - **Pages has no library.** Unlike Notes' folders, Pages only knows about documents open right now — there is nothing to search. `documents_list` shows what's open; `open_document` opens a file that isn't.
-- **`document_get` returns plain text, with no markup option.** Pages' own dictionary types `body text` as rich text with no scriptable string form of the formatting — there is no `html=true` equivalent the way Notes has one.
+- **`document_get` returns plain text, with no markup option.** Pages' own dictionary types `body text` as rich text with no scriptable string form of the formatting — there is no `html=true` equivalent the way Notes has one. Styling is write-only: you can set a paragraph's look with `paragraphs`, but reading a document back never tells you what style a paragraph has.
+- **`paragraphs` gives `create_document`/`update_document` real styling — headings, quotes — but not tables.** One entry per paragraph, each with a `style` (`title`, `heading1`–`heading3`, `quote`, `body`) mapped to a fixed font/size/color preset — the entire scriptable surface of a Pages paragraph, confirmed live. `quote` is an approximation (italic, grey); Pages has no real block quote to draw. Tables, shapes, images and charts cannot be created through Pages' scripting interface **at all** — confirmed live, not merely unimplemented (see "Known limits").
 - **`update_document` requires an explicit `mode`.** `append` keeps everything already there; `replace` discards the whole body and cannot be undone from here.
 - **Password-protected documents are refused outright.** No tool here reads, writes or exports a document Pages reports as locked, and none accepts a password as an argument — the same policy [apple-pdf-mcp](https://github.com/eneko-codes) uses for encrypted PDFs.
 - **`save_document` and `export_document` require `confirm=true` to overwrite an existing file.** `close_document` requires it for `saving=true`.
@@ -113,7 +114,7 @@ One wrinkle specific to Pages: `body text` is typed as rich text, not plain text
 
 - No library or search — only documents already open, or opened by path.
 - No markup access — `document_get` is plain text only, with no formatted alternative.
-- No table, shape, image or chart editing — counts only.
+- No table, shape, image or chart creation — confirmed impossible, not merely unimplemented. Live-tested: `make new table`, `make new shape` and `make new placeholder text` all fail identically with "AppleEvent handler failed", via both the Objective-C bridge and plain AppleScript, across several location/property variants. Pages declares these as elements for *reading* — `document_get` reports their counts — but ships no working "make" handler for any of them. No editing of ones that already exist, either.
 - No password handling of any kind — a locked document is refused, not decrypted.
 - Opening a password-protected file, or saving/closing a never-saved document, can make Pages show its own blocking dialog. `close_document` refuses `saving=true` on a never-saved document outright; the same risk exists for `save_document`'s first save of a brand-new document and is not fully closed off, only bounded — every Apple event this server sends has a 30-second timeout (Pages' own default is closer to two minutes), so a stuck call fails with a clear error instead of hanging the whole way there.
 - `save_document` to a new path is unreliable for a document that already has one — see "The rules worth knowing" above. `export_document` (format `pages09`) is the dependable alternative.

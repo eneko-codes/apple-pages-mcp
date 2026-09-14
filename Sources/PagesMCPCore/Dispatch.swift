@@ -107,8 +107,16 @@ public struct PageTools: Sendable {
             guard installed.contains(where: { $0.caseInsensitiveCompare(templateName) == .orderedSame })
             else { throw ToolError.templateNotFound(name: templateName, available: installed) }
         }
+
+        let body = arguments.optionalBody("body")
+        let paragraphs = try arguments.optionalParagraphs("paragraphs")
+        guard body == nil || paragraphs == nil else {
+            throw ToolError.badArgument(
+                name: "paragraphs", reason: "cannot be given together with 'body' — pick one")
+        }
+
         let draft = DocumentDraft(
-            templateName: templateName, initialBodyText: arguments.optionalString("body"))
+            templateName: templateName, initialBodyText: body, paragraphs: paragraphs)
         return format.created(try await store.create(draft))
     }
 
@@ -118,12 +126,35 @@ public struct PageTools: Sendable {
         // reported without a round trip, and so no path can reach the store with mode
         // unresolved.
         let mode = try arguments.updateMode("mode")
-        let body = try arguments.requiredBody("body")
+        let body = arguments.optionalBody("body")
+        let paragraphs = try arguments.optionalParagraphs("paragraphs")
+        switch (body, paragraphs) {
+        case (nil, nil):
+            throw ToolError.badArgument(
+                name: "body", reason: "either 'body' or 'paragraphs' is required")
+        case (.some, .some):
+            throw ToolError.badArgument(
+                name: "paragraphs", reason: "cannot be given together with 'body' — pick one")
+        default:
+            break
+        }
+        if paragraphs != nil, mode != .replace {
+            throw ToolError.badArgument(
+                name: "paragraphs",
+                reason: "only works with mode=replace — splicing styled paragraphs into "
+                    + "an existing body at the right position is not implemented")
+        }
 
         let existing = try await requireOpenDocument(identifier, includePageTexts: false)
         guard !existing.summary.isPasswordProtected else {
             throw ToolError.documentPasswordProtected(
                 name: existing.name, action: mode == .append ? "appending to it" : "replacing it")
+        }
+
+        if let paragraphs {
+            let updated = try await store.replaceStyledParagraphs(
+                identifier: identifier, paragraphs: paragraphs)
+            return format.updated(updated, mode: mode, previousLength: existing.bodyText.count)
         }
 
         // Read, compose, write. A document edited in Pages.app between those two steps
@@ -133,9 +164,16 @@ public struct PageTools: Sendable {
         let composed: String
         switch mode {
         case .append:
-            composed = existing.bodyText + body
+            composed = existing.bodyText + (body ?? "")
         case .replace:
-            composed = body
+            composed = body ?? ""
+        }
+        guard !composed.isEmpty else {
+            throw ToolError.badArgument(
+                name: "body",
+                reason: "it is empty. A document with no content cannot be told apart "
+                    + "from a mistake, and replacing one with nothing is the mistake this "
+                    + "server refuses hardest.")
         }
 
         let updated = try await store.updateBody(identifier: identifier, text: composed)

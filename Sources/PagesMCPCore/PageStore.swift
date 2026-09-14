@@ -62,6 +62,15 @@ public protocol PageStore: Sendable {
     /// the tests can reach it.
     func updateBody(identifier: String, text: String) async throws -> DocumentDetail
 
+    /// Replaces the document's whole body with `paragraphs`, one paragraph per entry, each
+    /// styled according to `ParagraphStyle.preset`. Replace-only — appending styled
+    /// paragraphs onto an existing rich-text body is not implemented; splicing new,
+    /// separately-styled paragraphs into place among ones already there needs paragraph
+    /// index bookkeeping this server does not currently do, and getting that wrong risks
+    /// restyling text that was never meant to change.
+    func replaceStyledParagraphs(identifier: String, paragraphs: [StyledParagraph]) async throws
+        -> DocumentDetail
+
     /// Saves to `path`, or to the document's existing path when `path` is nil.
     func save(identifier: String, path: String?) async throws -> DocumentDetail
 

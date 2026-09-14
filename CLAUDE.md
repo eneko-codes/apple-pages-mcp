@@ -69,11 +69,50 @@ open document (same window, same content) returned a different `id` from `docume
 after being saved. `ToolError.notFound`'s message says so; do not "fix" a test or a bug
 report that assumes an id is a permanent handle the way it would be for a database row.
 
+**A paragraph's font/size/color can be set directly on the indexed specifier — no `-get`
+first, unlike the document lookup above.** `richText.paragraphs[i]` from
+`[document.bodyText.paragraphs objectAtIndex:i]` is *also* an unresolved specifier by the
+same "whose"-style reasoning, but calling `-get` on *this one* eagerly coerces it to its
+own plain-text `NSString` (verified live) — a value with no `font`/`size`/`color`
+properties at all. Setting those three directly on the unresolved paragraph specifier
+works and is correct; resolving first is not the fix here, it is a different bug. See
+`applyStyledParagraphs:toDocument:` and the doc comment on `PagesRichTextParagraph`.
+
+**Pages' own named paragraph styles (Title, Heading, Body — the ones in its Format
+sidebar, with a dropdown and a "*" marking a local override) are not scriptable by any
+name, at all.** A person pointed at the sidebar and asked why `paragraphs`' output wasn't
+using it — it wasn't, and re-verified live in response: `set style of paragraph 1 of body
+text of d to "Heading"` fails ("Can't set style... to..."), and fails identically even
+with a plain built-in constant (`{bold}`) instead of a string, meaning whatever "style"
+resolves to is not this at all — it is a leftover generic Cocoa text-run property
+(bold/italic/underline flags), unrelated to named paragraph styles, and Pages refuses to
+set it to anything regardless. `paragraph style` and `class` are not recognized as
+properties at all. `ParagraphStyle`'s font/size/color presets are a *visual*
+approximation the owner explicitly chose to keep, fully informed that a paragraph styled
+this way will not appear in a Table of Contents and will not respond to a theme change —
+see `ParagraphStyle`'s doc comment and the tool descriptions in `ToolCatalog.swift`. The
+only other route in would be Accessibility/GUI scripting of the sidebar itself, which
+`apple-mcp-architecture.md` treats as a last resort, never a pattern to build on — do not
+add it without discussing the architecture change with the owner first.
+
+**Creating anything other than the top-level `document` object is not possible through
+Pages' scripting interface, at all.** Verified live: `make new table`, `make new shape`
+and `make new placeholder text` all failed identically with "AppleEvent handler failed" —
+tried against three different classes and several location variants (`at end of d`, `at
+end of tables of d`, `with properties {row count:3, ...}`), all the same failure, and the
+identical AppleScript command fails the same way, so this is not an Objective-C bridging
+problem. Pages declares `table`/`shape`/`image`/`chart` as elements in its dictionary for
+*reading* — `document_get` reports their counts — but the app's own Apple Event handlers
+for creating them do not exist. Do not spend more time on "make new table" syntax
+variants; the ceiling is real and this project's own live testing already covers it. If
+Apple ever ships real support, the entry point would be a new `PagesBridge` method
+alongside `applyStyledParagraphs:toDocument:`, not a fix to it.
+
 ## Native surface not used
 
 `sdef "/Applications/Pages Creator Studio.app"` is the authority on what is possible here — or generate the real Objective-C header with `sdp -fh` before hand-declaring a new protocol member, and check it against the running app the way the comment at the top of `PagesBridge.m` describes.
 
-- Table, cell, shape, image and chart manipulation — the dictionary exposes plenty (sort, merge, cell values and formulas, rotation, opacity...) and none of it is wired up. `document_get` reports counts only.
+- Table, shape, image and chart **creation** — confirmed impossible; see the finding above. Cell values, sort/merge, rotation, opacity and the rest of what the dictionary exposes for objects that already exist are still unwired, but there is no way to create one to test them against, either.
 - `set password` / `remove password` — exist in the dictionary. Not exposed: this server refuses password-protected documents outright rather than handle a password as an argument, matching `apple-pdf-mcp`'s stance on encrypted PDFs.
 - The `TPDocumentBackgroundExportIntent` Shortcuts action (export a closed document to PDF/Word without opening it) — a real capability gap the sdef `export` command can't fill, decoded from `Metadata.appintents/extract.actionsdata` in the app bundle. Not built: it needs a `.shortcut` a person installs by hand (`shortcuts` has no import command), and there is no existing Shortcuts-invocation pattern anywhere in this project's sibling repos to mirror. Worth adding later, deliberately, not as an afterthought.
 - Application-level `selection` and any window property — reading what the owner has on screen, or moving their windows, is not this server's business.

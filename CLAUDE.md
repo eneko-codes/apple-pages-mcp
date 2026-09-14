@@ -78,6 +78,23 @@ properties at all. Setting those three directly on the unresolved paragraph spec
 works and is correct; resolving first is not the fix here, it is a different bug. See
 `applyStyledParagraphs:toDocument:` and the doc comment on `PagesRichTextParagraph`.
 
+**Pages' own named paragraph styles (Title, Heading, Body — the ones in its Format
+sidebar, with a dropdown and a "*" marking a local override) are not scriptable by any
+name, at all.** A person pointed at the sidebar and asked why `paragraphs`' output wasn't
+using it — it wasn't, and re-verified live in response: `set style of paragraph 1 of body
+text of d to "Heading"` fails ("Can't set style... to..."), and fails identically even
+with a plain built-in constant (`{bold}`) instead of a string, meaning whatever "style"
+resolves to is not this at all — it is a leftover generic Cocoa text-run property
+(bold/italic/underline flags), unrelated to named paragraph styles, and Pages refuses to
+set it to anything regardless. `paragraph style` and `class` are not recognized as
+properties at all. `ParagraphStyle`'s font/size/color presets are a *visual*
+approximation the owner explicitly chose to keep, fully informed that a paragraph styled
+this way will not appear in a Table of Contents and will not respond to a theme change —
+see `ParagraphStyle`'s doc comment and the tool descriptions in `ToolCatalog.swift`. The
+only other route in would be Accessibility/GUI scripting of the sidebar itself, which
+`apple-mcp-architecture.md` treats as a last resort, never a pattern to build on — do not
+add it without discussing the architecture change with the owner first.
+
 **Creating anything other than the top-level `document` object is not possible through
 Pages' scripting interface, at all.** Verified live: `make new table`, `make new shape`
 and `make new placeholder text` all failed identically with "AppleEvent handler failed" —

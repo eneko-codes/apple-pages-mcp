@@ -31,8 +31,12 @@ public enum PagesMCPServer {
         create_document and update_document (replace mode only) accept 'paragraphs' as \
         an alternative to plain-text 'body': one entry per paragraph, each styled as \
         title/heading1/heading2/heading3/quote/body via a fixed font/size/color preset — \
-        the entire scriptable surface Pages exposes for a paragraph of rich text. quote \
-        is an approximation (italic, grey); Pages has no real block quote. Tables, \
+        the entire scriptable surface Pages exposes for a paragraph of rich text. This \
+        is NOT one of Pages' own named paragraph styles (confirmed live: no such thing \
+        is scriptable by any name) — a styled paragraph will not appear in a Table of \
+        Contents and will not respond to a theme change, the same as manually formatted \
+        text. quote is likewise an approximation (italic, grey); Pages has no real \
+        block quote. Tables, \
         shapes, images and charts cannot be created through Pages' scripting interface \
         at all — confirmed live, not merely unimplemented here — so there is no tool for \
         any of them.

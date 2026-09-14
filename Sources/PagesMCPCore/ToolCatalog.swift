@@ -89,9 +89,16 @@ public enum ToolCatalog {
         contain a newline — split multi-line content into separate entries instead, one \
         per Pages paragraph.
 
-        Styles are fixed presets, the only three properties Pages exposes on a \
-        paragraph of rich text (font, size, color) — not a real named style the way \
-        Pages' own Format sidebar offers:
+        Styles are fixed presets built from font, size and color — the only three \
+        properties Pages' scripting dictionary exposes on a paragraph. They are NOT the \
+        named paragraph styles Pages' own Format sidebar offers (Title, Heading, Body, \
+        with a dropdown and a "*" for local overrides) — confirmed live that no such \
+        thing is scriptable at all: neither a "style" property, a "paragraph style" \
+        property, nor any other name tried actually selects one. What this produces \
+        looks like a heading but IS NOT ONE to Pages itself: it will not appear in a \
+        Table of Contents (built from named heading styles) and will not change if the \
+        document's theme changes, exactly as if you had selected text and bumped its \
+        font size by hand rather than picked "Heading" from the sidebar.
           title      28pt bold
           heading1   22pt bold
           heading2   17pt bold

@@ -79,13 +79,19 @@ public struct DocumentDraft: Sendable, Equatable {
     }
 }
 
-/// A named look for one paragraph, backed by a fixed font/size/color preset — the only
-/// three properties Pages' own dictionary exposes on a paragraph of rich text. There is no
-/// scriptable concept of a named style ("Heading 1" as Pages' template defines it, the way
-/// a person picks it from the Format sidebar): verified against the running app, setting
-/// `font`/`size`/`color` is the entire native surface. Nothing here claims otherwise —
-/// `quote` in particular is an approximation (italic, grey) standing in for a real block
-/// quote, because Pages' dictionary has no indent or rule property to draw one with.
+/// A named *look* for one paragraph, backed by a fixed font/size/color preset — the only
+/// three properties Pages' own dictionary exposes on a paragraph of rich text. This is
+/// deliberately not the same thing as one of Pages' own named paragraph styles (Title,
+/// Heading, Body — the ones in its Format sidebar, with a dropdown and a "*" marking a
+/// local override): re-verified live, twice, that no such thing is scriptable by any
+/// name — `style` resolves to an unrelated, generic Cocoa text-run property (bold/italic/
+/// underline flags) that Pages refuses to set to anything at all, and `paragraph style` /
+/// `class` are not recognised as properties. A paragraph given one of these presets will
+/// not appear in a Table of Contents, which Pages builds from its own named heading
+/// styles, and will not respond to a theme change — it is indistinguishable, to Pages
+/// itself, from selecting text and changing its font by hand. `quote` is likewise an
+/// approximation (italic, grey) standing in for a real block quote, because Pages'
+/// dictionary has no indent or rule property to draw one with.
 ///
 /// Presets are fixed constants, not something a caller tunes: what "heading2" looks like
 /// is not a judgment call once decided once, the same way a stylesheet is not re-litigated

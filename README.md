@@ -1,0 +1,129 @@
+<p align="center"><img src="extension/icon.png" width="128" height="128" alt=""></p>
+
+# apple-pages-mcp
+
+A local MCP server, written in Swift, that gives [Claude](https://claude.ai) access to the [Pages](https://www.apple.com/pages/) app on this Mac — reading, creating, editing and exporting documents through Apple events.
+
+Pages has no framework a separate process can use, so this server drives Pages.app itself — the same route [apple-notes-mcp](https://github.com/eneko-codes/apple-notes-mcp) takes for Notes. The App Store now lists the app as **"Pages Creator Studio"**; that is a display-name change Apple made, not a different app — its bundle identifier, scripting dictionary and everything this server talks to are unchanged.
+
+Not affiliated with or endorsed by Apple Inc.
+
+## Requirements
+
+- macOS 15 or later, with Pages installed
+- Swift 6.0+ / Xcode 26 to build
+- A stable code-signing identity if you want an Automation grant to survive a rebuild — ad-hoc signing works, but every rebuild becomes a "new" program to TCC and you re-approve it each time (see [Signing](#signing-and-why-it-is-not-optional))
+
+## Tools
+
+| Tool | Kind | What it does |
+|---|---|---|
+| `pages_status` | read | Availability, Automation permission, configured limits |
+| `documents_list` | read | Every document currently open in Pages |
+| `document_get` | read | One open document's body text and structure |
+| `create_document` | write | New document, optional template, optional initial body |
+| `open_document` | write | Opens an existing `.pages` file by path |
+| `update_document` | write | Append to or replace a document's body |
+| `save_document` | write | Save, in place or to a new path |
+| `close_document` | **destructive** | Close, discarding changes by default |
+| `export_document` | write | Export to PDF, Word, EPUB, RTF, plain text or Pages '09 |
+
+## The rules worth knowing before you use it
+
+- **Pages has no library.** Unlike Notes' folders, Pages only knows about documents open right now — there is nothing to search. `documents_list` shows what's open; `open_document` opens a file that isn't.
+- **`document_get` returns plain text, with no markup option.** Pages' own dictionary types `body text` as rich text with no scriptable string form of the formatting — there is no `html=true` equivalent the way Notes has one.
+- **`update_document` requires an explicit `mode`.** `append` keeps everything already there; `replace` discards the whole body and cannot be undone from here.
+- **Password-protected documents are refused outright.** No tool here reads, writes or exports a document Pages reports as locked, and none accepts a password as an argument — the same policy [apple-pdf-mcp](https://github.com/eneko-codes) uses for encrypted PDFs.
+- **`save_document` and `export_document` require `confirm=true` to overwrite an existing file.** `close_document` requires it for `saving=true`.
+- **Pages autosaves.** A brand-new document is written into iCloud Drive by Pages itself within seconds of creation — before any explicit save, and independently of whether you ever call `save_document`. Closing it with `saving=false` does not undo that. If you made something disposable, delete the file yourself (through the filesystem server, or Finder) — this server has no delete tool of any kind.
+- **No delete tool, anywhere.** Removing a `.pages` file from disk is the filesystem server's job, not this one's.
+
+## Install
+
+### 1. Build the bundle
+
+```bash
+git clone https://github.com/eneko-codes/apple-pages-mcp.git
+cd apple-pages-mcp
+bash scripts/pack.sh
+```
+
+This produces `dist/apple-pages-mcp.mcpb`.
+
+### 2. Install it
+
+Open the `.mcpb` file with Claude Desktop, then enable the tools you want in Settings → Extensions.
+
+### 3. Grant the permission
+
+The first time a tool actually calls Pages, macOS shows an Automation dialog: *"apple-pages-mcp" wants to control "Pages Creator Studio"*. Approve it. If you miss it or deny it, grant it by hand in:
+
+```
+System Settings → Privacy & Security → Automation → apple-pages-mcp → enable Pages
+```
+
+### Signing, and why it is not optional
+
+`swift build` leaves an **ad-hoc, linker-signed** binary. macOS treats `linker-signed` as "signed by nobody": TCC will not register it as a subject at all, so the Automation dialog above never appears and the request just sits as `notDetermined` — a silent failure with no error message to search for. `scripts/pack.sh` always re-signs with `codesign`, which turns that into a plain ad-hoc signature TCC can see.
+
+Plain ad-hoc signing still has no *designated requirement*, so TCC falls back to the binary's hash — and every rebuild produces a new hash, so every rebuild loses the grant. To make a grant durable across rebuilds, sign with a real identity:
+
+```bash
+MCPB_SIGN_IDENTITY="Apple Development: Your Name (TEAMID)" bash scripts/pack.sh
+```
+
+### Preparing something to distribute
+
+Hardened runtime is off by default — it's required for notarisation, not for TCC, and it blocks Apple events unless the entitlement is granted. Opt in with:
+
+```bash
+MCPB_HARDENED=1 MCPB_SIGN_IDENTITY="..." bash scripts/pack.sh
+```
+
+## Tool switches
+
+Every tool has its own on/off switch in Claude Desktop, populated from `extension/manifest.json`'s `tools` array before the server has ever run. There is no other configuration: numeric limits (like how much body text `document_get` returns by default) are fixed sensible constants in `Configuration.swift`, not settings — the only thing to decide is which tools are on.
+
+## Manual registration instead
+
+If you'd rather run this outside the extension system:
+
+```json
+{
+  "mcpServers": {
+    "apple-pages-mcp": {
+      "command": "/path/to/apple-pages-mcp"
+    }
+  }
+}
+```
+
+Don't run both registrations at once — Pages would get two Automation subjects to approve instead of one.
+
+## Implementation note: why the Apple events are in Objective-C
+
+Apple documents exactly one way to create a scriptable object: `classForScriptingClass:`, `alloc`/`initWithProperties:`, then insert it into the container's element array. The class that comes back is an `SBPseudoClass`, and a Swift metatype cast against it aborts the process ([swiftlang/swift#43407](https://github.com/swiftlang/swift/issues/43407), open since 2016). In Objective-C the documented pattern just compiles. See `Sources/PagesBridge/PagesBridge.m` — and its sibling in [apple-notes-mcp](https://github.com/eneko-codes/apple-notes-mcp), which this project mirrors exactly.
+
+One wrinkle specific to Pages: `body text` is typed as rich text, not plain text, in Pages' own dictionary — confirmed by generating Apple's real `sdp`-produced header and by a live probe against the running app. Reading it as a string needs the explicit `as text` coercion AppleScript performs automatically, sent by hand through `SBObject`'s public `sendEvent:id:parameters:`. The bridge does this once, in one place; nothing above that seam ever sees the rich text object.
+
+## Known limits
+
+- No library or search — only documents already open, or opened by path.
+- No markup access — `document_get` is plain text only, with no formatted alternative.
+- No table, shape, image or chart editing — counts only.
+- No password handling of any kind — a locked document is refused, not decrypted.
+- Opening a password-protected file, or closing a never-saved document with `saving=true`, makes Pages show its own blocking dialog; `open_document` documents the risk, and `close_document` refuses the second case outright rather than risk hanging.
+- Exporting is bound by Pages' own sandbox: only Desktop, Documents, Downloads, or a folder separately granted.
+
+## Development
+
+```bash
+swift build
+swift test
+```
+
+28 tests, all against an in-memory fake — no test here sends an Apple event or touches a real document. Full verification against real Pages remains the **owner's** job, by hand, with MCP Inspector. `verification.md` is the script for it.
+
+## Licence
+
+MIT

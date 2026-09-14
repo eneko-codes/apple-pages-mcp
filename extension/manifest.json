@@ -1,0 +1,79 @@
+{
+  "manifest_version": "0.3",
+  "name": "apple-pages-mcp",
+  "display_name": "Apple Pages",
+  "version": "1.0.0",
+  "description": "Read, create and export Apple Pages documents through the Pages app",
+  "long_description": "A local MCP server written in Swift that gives Claude access to the Pages app on this Mac.\n\nPages has no framework a separate process can use, so this server drives Pages itself through Apple events — the same route apple-notes-mcp takes for Notes. Pages must be running, and the grant appears under System Settings → Privacy & Security → Automation. The app may show as \"Pages Creator Studio\" there and in permission dialogs; that is a display-name change Apple made, not a different app.\n\nPages has no library the way Notes has folders — it only knows about documents open right now. documents_list shows what is open; open_document opens a file that is not.\n\nupdate_document makes you say whether you are appending or replacing. Silently replacing a whole document's body is the mistake worth designing against.\n\nPassword-protected documents are refused by every tool that would read, write or export one, and no tool accepts a password as an argument — the same policy apple-pdf-mcp uses for encrypted PDFs.\n\nNot affiliated with or endorsed by Apple Inc.",
+  "author": {
+    "name": "eneko-codes",
+    "url": "https://github.com/eneko-codes"
+  },
+  "homepage": "https://github.com/eneko-codes/apple-pages-mcp",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/eneko-codes/apple-pages-mcp"
+  },
+  "license": "MIT",
+  "icon": "icon.png",
+  "keywords": [
+    "pages",
+    "apple events",
+    "macos",
+    "writing",
+    "documents"
+  ],
+  "server": {
+    "type": "binary",
+    "entry_point": "server/apple-pages-mcp",
+    "mcp_config": {
+      "command": "${__dirname}/server/apple-pages-mcp",
+      "args": [],
+      "env": {}
+    }
+  },
+  "tools": [
+    {
+      "name": "pages_status",
+      "description": "Reports whether Pages is running, whether this server may automate it, and what limits are in force. Touches no document."
+    },
+    {
+      "name": "documents_list",
+      "description": "Lists every document currently open in Pages, with its page count and whether it has unsaved changes."
+    },
+    {
+      "name": "document_get",
+      "description": "Returns one open document's body text, page/section/table/image/chart counts, and whether it is password protected."
+    },
+    {
+      "name": "create_document",
+      "description": "Creates a new, unsaved document in Pages — optionally from a named template, optionally with an initial plain-text body."
+    },
+    {
+      "name": "open_document",
+      "description": "Opens the Pages document at 'path'. Returns the same detail document_get would."
+    },
+    {
+      "name": "update_document",
+      "description": "Changes an open document's body text. 'mode' is REQUIRED and decides whether text is appended or the whole body is replaced."
+    },
+    {
+      "name": "save_document",
+      "description": "Saves an open document, to its existing path or to a new one. Requires confirm=true when the destination already exists."
+    },
+    {
+      "name": "close_document",
+      "description": "Closes an open document. Defaults to discarding unsaved changes; saving requires confirm=true."
+    },
+    {
+      "name": "export_document",
+      "description": "Exports an open document to pdf, word, epub, rtf, plain_text or pages09. Requires confirm=true when the destination already exists."
+    }
+  ],
+  "compatibility": {
+    "claude_desktop": ">=0.10.0",
+    "platforms": [
+      "darwin"
+    ]
+  }
+}

@@ -173,6 +173,64 @@ struct PageToolsTests {
         #expect(text.contains("Nonexistent"))
     }
 
+    @Test("create_document accepts styled paragraphs as an alternative to body")
+    func createAcceptsStyledParagraphs() async {
+        let store = stocked()
+        let (_, isError) = await call(
+            ToolCatalog.createName,
+            [
+                "paragraphs": .array([
+                    .object(["text": .string("ZZTest Title"), "style": .string("title")]),
+                    .object(["text": .string("Plain paragraph")]),
+                ])
+            ], store: store)
+        #expect(!isError)
+        #expect(store.created.count == 1)
+        #expect(store.created.first?.paragraphs?.map(\.style) == [.title, .body])
+        #expect(store.created.first?.paragraphs?.map(\.text) == ["ZZTest Title", "Plain paragraph"])
+    }
+
+    @Test("create_document refuses body and paragraphs together")
+    func createRefusesBodyAndParagraphsTogether() async {
+        let store = stocked()
+        let (text, isError) = await call(
+            ToolCatalog.createName,
+            [
+                "body": .string("x"),
+                "paragraphs": .array([.object(["text": .string("y")])]),
+            ], store: store)
+        #expect(isError)
+        #expect(store.created.isEmpty)
+        #expect(text.contains("paragraphs"))
+    }
+
+    @Test("create_document refuses an unknown paragraph style")
+    func createRefusesUnknownParagraphStyle() async {
+        let store = stocked()
+        let (text, isError) = await call(
+            ToolCatalog.createName,
+            [
+                "paragraphs": .array([
+                    .object(["text": .string("x"), "style": .string("h1")])
+                ])
+            ], store: store)
+        #expect(isError)
+        #expect(store.created.isEmpty)
+        #expect(text.contains("h1"))
+    }
+
+    @Test("create_document refuses a paragraph whose text contains a newline")
+    func createRefusesEmbeddedNewline() async {
+        let store = stocked()
+        let (text, isError) = await call(
+            ToolCatalog.createName,
+            ["paragraphs": .array([.object(["text": .string("line one\nline two")])])],
+            store: store)
+        #expect(isError)
+        #expect(store.created.isEmpty)
+        #expect(text.contains("newline"))
+    }
+
     /// The footgun this server is designed against: silently replacing a whole body.
     /// `mode` is required, so neither the model nor a slip can default into destruction.
     @Test("update_document refuses to guess between appending and replacing")
@@ -211,6 +269,53 @@ struct PageToolsTests {
         #expect(!isError)
         let written = store.updatedBodies.first?.text ?? ""
         #expect(written == "only this")
+    }
+
+    @Test("update_document replace accepts styled paragraphs as an alternative to body")
+    func updateReplaceAcceptsStyledParagraphs() async {
+        let store = stocked()
+        let (_, isError) = await call(
+            ToolCatalog.updateName,
+            [
+                "id": .string("d2"), "mode": .string("replace"),
+                "paragraphs": .array([
+                    .object(["text": .string("Heading"), "style": .string("heading1")]),
+                    .object(["text": .string("A quote"), "style": .string("quote")]),
+                ]),
+            ], store: store)
+        #expect(!isError)
+        #expect(store.restyled.first?.identifier == "d2")
+        #expect(store.restyled.first?.paragraphs.map(\.style) == [.heading1, .quote])
+    }
+
+    @Test("update_document refuses paragraphs with mode=append")
+    func updateRefusesParagraphsWithAppend() async {
+        let store = stocked()
+        let (text, isError) = await call(
+            ToolCatalog.updateName,
+            [
+                "id": .string("d2"), "mode": .string("append"),
+                "paragraphs": .array([.object(["text": .string("x")])]),
+            ], store: store)
+        #expect(isError)
+        #expect(store.restyled.isEmpty)
+        #expect(text.contains("replace"))
+    }
+
+    @Test("update_document requires exactly one of body or paragraphs")
+    func updateRequiresBodyOrParagraphs() async {
+        let store = stocked()
+        let (_, missingBoth) = await call(
+            ToolCatalog.updateName, ["id": .string("d2"), "mode": .string("replace")], store: store)
+        #expect(missingBoth)
+
+        let (_, both) = await call(
+            ToolCatalog.updateName,
+            [
+                "id": .string("d2"), "mode": .string("replace"), "body": .string("x"),
+                "paragraphs": .array([.object(["text": .string("y")])]),
+            ], store: store)
+        #expect(both)
     }
 
     @Test("update_document refuses a password-protected document")

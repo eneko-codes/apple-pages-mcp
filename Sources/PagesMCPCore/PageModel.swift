@@ -64,10 +64,71 @@ public struct DocumentDetail: Sendable, Equatable {
 public struct DocumentDraft: Sendable, Equatable {
     public var templateName: String?
     public var initialBodyText: String?
+    /// An alternative to `initialBodyText`: one entry per paragraph, each carrying its own
+    /// style. Mutually exclusive with `initialBodyText` — the dispatch layer enforces that,
+    /// not this type.
+    public var paragraphs: [StyledParagraph]?
 
-    public init(templateName: String? = nil, initialBodyText: String? = nil) {
+    public init(
+        templateName: String? = nil, initialBodyText: String? = nil,
+        paragraphs: [StyledParagraph]? = nil
+    ) {
         self.templateName = templateName
         self.initialBodyText = initialBodyText
+        self.paragraphs = paragraphs
+    }
+}
+
+/// A named look for one paragraph, backed by a fixed font/size/color preset — the only
+/// three properties Pages' own dictionary exposes on a paragraph of rich text. There is no
+/// scriptable concept of a named style ("Heading 1" as Pages' template defines it, the way
+/// a person picks it from the Format sidebar): verified against the running app, setting
+/// `font`/`size`/`color` is the entire native surface. Nothing here claims otherwise —
+/// `quote` in particular is an approximation (italic, grey) standing in for a real block
+/// quote, because Pages' dictionary has no indent or rule property to draw one with.
+///
+/// Presets are fixed constants, not something a caller tunes: what "heading2" looks like
+/// is not a judgment call once decided once, the same way a stylesheet is not re-litigated
+/// per document.
+public enum ParagraphStyle: String, Sendable, Equatable, CaseIterable {
+    case title
+    case heading1
+    case heading2
+    case heading3
+    case quote
+    case body
+
+    public struct Preset: Sendable, Equatable {
+        public let font: String
+        public let size: Double
+        /// `nil` means "Pages' own default text color" — only `quote` overrides it.
+        public let color: (red: Double, green: Double, blue: Double)?
+
+        public static func == (lhs: Preset, rhs: Preset) -> Bool {
+            lhs.font == rhs.font && lhs.size == rhs.size && lhs.color?.red == rhs.color?.red
+                && lhs.color?.green == rhs.color?.green && lhs.color?.blue == rhs.color?.blue
+        }
+    }
+
+    public var preset: Preset {
+        switch self {
+        case .title: return Preset(font: "Helvetica-Bold", size: 28, color: nil)
+        case .heading1: return Preset(font: "Helvetica-Bold", size: 22, color: nil)
+        case .heading2: return Preset(font: "Helvetica-Bold", size: 17, color: nil)
+        case .heading3: return Preset(font: "Helvetica-Bold", size: 14, color: nil)
+        case .quote: return Preset(font: "Helvetica-Oblique", size: 12, color: (0.35, 0.35, 0.35))
+        case .body: return Preset(font: "Helvetica", size: 12, color: nil)
+        }
+    }
+}
+
+public struct StyledParagraph: Sendable, Equatable {
+    public var text: String
+    public var style: ParagraphStyle
+
+    public init(text: String, style: ParagraphStyle = .body) {
+        self.text = text
+        self.style = style
     }
 }
 

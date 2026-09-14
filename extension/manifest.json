@@ -4,7 +4,7 @@
   "display_name": "Apple Pages",
   "version": "1.0.0",
   "description": "Read, create and export Apple Pages documents through the Pages app",
-  "long_description": "A local MCP server written in Swift that gives Claude access to the Pages app on this Mac.\n\nPages has no framework a separate process can use, so this server drives Pages itself through Apple events — the same route apple-notes-mcp takes for Notes. Pages must be running, and the grant appears under System Settings → Privacy & Security → Automation. The app may show as \"Pages Creator Studio\" there and in permission dialogs; that is a display-name change Apple made, not a different app.\n\nPages has no library the way Notes has folders — it only knows about documents open right now. documents_list shows what is open; open_document opens a file that is not.\n\nupdate_document makes you say whether you are appending or replacing. Silently replacing a whole document's body is the mistake worth designing against.\n\nPassword-protected documents are refused by every tool that would read, write or export one, and no tool accepts a password as an argument — the same policy apple-pdf-mcp uses for encrypted PDFs.\n\nNot affiliated with or endorsed by Apple Inc.",
+  "long_description": "A local MCP server written in Swift that gives Claude access to the Pages app on this Mac.\n\nPages has no framework a separate process can use, so this server drives Pages itself through Apple events — the same route apple-notes-mcp takes for Notes. Pages must be running, and the grant appears under System Settings → Privacy & Security → Automation. The app may show as \"Pages Creator Studio\" there and in permission dialogs; that is a display-name change Apple made, not a different app.\n\nPages has no library the way Notes has folders — it only knows about documents open right now. documents_list shows what is open; open_document opens a file that is not.\n\nupdate_document makes you say whether you are appending or replacing. Silently replacing a whole document's body is the mistake worth designing against.\n\ncreate_document and update_document (replace mode) accept styled paragraphs — real headings and quotes, via font/size/color, the entire scriptable surface Pages exposes for a paragraph. Tables, shapes, images and charts cannot be created at all through Pages' scripting interface, confirmed live.\n\nPassword-protected documents are refused by every tool that would read, write or export one, and no tool accepts a password as an argument — the same policy apple-pdf-mcp uses for encrypted PDFs.\n\nNot affiliated with or endorsed by Apple Inc.",
   "author": {
     "name": "eneko-codes",
     "url": "https://github.com/eneko-codes"
@@ -47,7 +47,7 @@
     },
     {
       "name": "create_document",
-      "description": "Creates a new, unsaved document in Pages — optionally from a named template, optionally with an initial plain-text body."
+      "description": "Creates a new, unsaved document in Pages — optionally from a named template, with an initial body as plain text or as styled paragraphs (headings, quotes)."
     },
     {
       "name": "open_document",
@@ -55,7 +55,7 @@
     },
     {
       "name": "update_document",
-      "description": "Changes an open document's body text. 'mode' is REQUIRED and decides whether text is appended or the whole body is replaced."
+      "description": "Changes an open document's body. 'mode' is REQUIRED and decides whether text is appended or the whole body is replaced. Replace accepts styled paragraphs (headings, quotes) as an alternative to plain text."
     },
     {
       "name": "save_document",

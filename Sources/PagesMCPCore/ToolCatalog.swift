@@ -73,10 +73,52 @@ public enum ToolCatalog {
     private static let idHelp = "Identifier returned by documents_list or by whichever tool opened it."
 
     private static let bodyHelp = """
-        The document's whole body, as plain text. Pages' own dictionary types this as \
-        rich text with no scriptable string form of the formatting, so this server can \
-        only read and write the plain text — no markup, no styling.
+        The document's whole body, as plain text, with no per-paragraph styling. Pass \
+        'paragraphs' instead for headings, quotes or other styled paragraphs. Exactly one \
+        of 'body' or 'paragraphs' — never both.
         """
+
+    /// One entry per Pages paragraph. Unlike `bodyHelp`'s plain string, this is where
+    /// styling actually lives — font, size and color per paragraph, the whole scriptable
+    /// surface Pages' own dictionary exposes for rich text, confirmed against the running
+    /// app. `quote` is Pages' closest approximation to a block quote (italic, grey); Pages
+    /// has no indent or rule to draw a real one with.
+    private static let paragraphsHelp = """
+        An alternative to 'body': one entry per paragraph, each with its own style. \
+        Exactly one of 'body' or 'paragraphs' — never both. A paragraph's 'text' may not \
+        contain a newline — split multi-line content into separate entries instead, one \
+        per Pages paragraph.
+
+        Styles are fixed presets, the only three properties Pages exposes on a \
+        paragraph of rich text (font, size, color) — not a real named style the way \
+        Pages' own Format sidebar offers:
+          title      28pt bold
+          heading1   22pt bold
+          heading2   17pt bold
+          heading3   14pt bold
+          quote      12pt italic, grey — an approximation; Pages has no real block quote
+          body       12pt regular (default if 'style' is omitted)
+        """
+
+    private static func paragraphsSchema(_ description: String) -> Value {
+        .object([
+            "type": .string("array"),
+            "description": .string(description),
+            "items": .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "text": string("This paragraph's text. No newlines."),
+                    "style": .object([
+                        "type": .string("string"),
+                        "enum": .array(ParagraphStyle.allCases.map { .string($0.rawValue) }),
+                        "description": .string("Defaults to \"body\" if omitted."),
+                    ]),
+                ]),
+                "required": .array([.string("text")]),
+                "additionalProperties": .bool(false),
+            ]),
+        ])
+    }
 
     private static let confirmHelp = "Must be true. Without it the call is refused."
 
@@ -153,7 +195,8 @@ public enum ToolCatalog {
         title: "Create a new document",
         description: """
             Creates a new, unsaved document in Pages — optionally from a named \
-            template, optionally with an initial plain-text body.
+            template, with an initial body given as either 'body' (plain text) or \
+            'paragraphs' (styled — headings, quotes; see 'paragraphs' below).
 
             Pages autosaves a new document into iCloud Drive within seconds of \
             creation, on its own schedule, whether or not save_document is ever called. \
@@ -165,9 +208,8 @@ public enum ToolCatalog {
                 "template": string(
                     "Optional template name, exactly as Pages' own template chooser "
                         + "shows it. Omit for a blank document."),
-                "body": string(
-                    "Optional initial body text, as plain text. Omit to start with an "
-                        + "empty document."),
+                "body": string(bodyHelp),
+                "paragraphs": paragraphsSchema(paragraphsHelp),
             ]),
         annotations: .init(
             readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false
@@ -199,8 +241,8 @@ public enum ToolCatalog {
         name: updateName,
         title: "Append to or replace a document's body",
         description: """
-            Changes an open document's body text. 'mode' is REQUIRED and decides which \
-            of two very different things happens:
+            Changes an open document's body. 'mode' is REQUIRED and decides which of two \
+            very different things happens:
 
               append   — adds your text to the end, keeping everything already there.
               replace  — DISCARDS THE WHOLE BODY and writes your text instead.
@@ -209,8 +251,12 @@ public enum ToolCatalog {
             already exists, read it with document_get first and use append unless the \
             person actually asked you to start over.
 
-            In append mode your text is concatenated onto the existing body exactly as \
-            given — begin it with a newline yourself if you want one.
+            Exactly one of 'body' (plain text) or 'paragraphs' (styled — see \
+            'paragraphs' below) is required. 'paragraphs' only works with mode=replace: \
+            splicing newly-styled paragraphs into an existing rich-text body at the \
+            right position is not implemented, so append is refused with 'paragraphs'. \
+            In append mode your plain 'body' text is concatenated onto the existing body \
+            exactly as given — begin it with a newline yourself if you want one.
 
             Refuses a password-protected document: its current content cannot be read, \
             so neither mode could be carried out honestly.
@@ -226,8 +272,10 @@ public enum ToolCatalog {
                             + "Required — there is deliberately no default."),
                 ]),
                 "body": string(bodyHelp),
+                "paragraphs": paragraphsSchema(
+                    "\(paragraphsHelp)\n\nOnly valid with mode=replace."),
             ],
-            required: ["id", "mode", "body"]),
+            required: ["id", "mode"]),
         annotations: .init(
             readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false
         )

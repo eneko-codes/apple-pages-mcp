@@ -19,6 +19,7 @@ final class FakePageStore: PageStore, @unchecked Sendable {
     private(set) var created: [DocumentDraft] = []
     private(set) var opened: [String] = []
     private(set) var updatedBodies: [(identifier: String, text: String)] = []
+    private(set) var restyled: [(identifier: String, paragraphs: [StyledParagraph])] = []
     private(set) var saved: [(identifier: String, path: String?)] = []
     private(set) var closed: [(identifier: String, saving: Bool)] = []
     private(set) var exported: [(identifier: String, path: String, format: ExportFormat)] = []
@@ -48,9 +49,10 @@ final class FakePageStore: PageStore, @unchecked Sendable {
         if let failure { throw failure }
         created.append(draft)
         let identifier = "x-invented-\(created.count)"
+        let text = draft.paragraphs.map { $0.map(\.text).joined(separator: "\n") } ?? draft.initialBodyText
         let document = Fixtures.document(
-            id: identifier, name: draft.initialBodyText.map { String($0.prefix(40)) } ?? "Untitled",
-            text: draft.initialBodyText ?? "", templateName: draft.templateName)
+            id: identifier, name: text.map { String($0.prefix(40)) } ?? "Untitled",
+            text: text ?? "", templateName: draft.templateName)
         documentsValue[identifier] = document
         return document
     }
@@ -70,6 +72,18 @@ final class FakePageStore: PageStore, @unchecked Sendable {
         if let failure { throw failure }
         updatedBodies.append((identifier: identifier, text: text))
         guard let existing = documentsValue[identifier] else { throw ToolError.storeFailure("gone") }
+        let updated = DocumentDetail(summary: existing.summary, bodyText: text)
+        documentsValue[identifier] = updated
+        return updated
+    }
+
+    func replaceStyledParagraphs(identifier: String, paragraphs: [StyledParagraph]) async throws
+        -> DocumentDetail
+    {
+        if let failure { throw failure }
+        restyled.append((identifier: identifier, paragraphs: paragraphs))
+        guard let existing = documentsValue[identifier] else { throw ToolError.storeFailure("gone") }
+        let text = paragraphs.map(\.text).joined(separator: "\n")
         let updated = DocumentDetail(summary: existing.summary, bodyText: text)
         documentsValue[identifier] = updated
         return updated

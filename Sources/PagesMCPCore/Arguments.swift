@@ -43,6 +43,15 @@ public struct Arguments {
         return trimmed.isEmpty ? nil : trimmed
     }
 
+    /// `nil` when absent; otherwise kept exactly as written — see `requiredBody` for why
+    /// a body argument is never trimmed. An empty string is treated the same as absent,
+    /// since `create_document`/`update_document` still need to tell "no body given" apart
+    /// from "an empty one", which is the caller's job once this returns nil.
+    public func optionalBody(_ name: String) -> String? {
+        guard let raw = values[name]?.stringValue, !raw.isEmpty else { return nil }
+        return raw
+    }
+
     public func bool(_ name: String, default fallback: Bool = false) -> Bool {
         values[name]?.boolValue ?? fallback
     }
@@ -81,5 +90,55 @@ public struct Arguments {
                 name: name, reason: "expected one of \(options), got \"\(raw)\"")
         }
         return format
+    }
+
+    // MARK: Structured paragraphs
+
+    /// `nil` when the argument is absent. An explicit empty array is rejected, the same as
+    /// an empty `body` string: a document with no content is indistinguishable from a
+    /// mistake.
+    ///
+    /// A paragraph's `text` may not contain `\n` — Pages would split it into more
+    /// paragraphs than this server told it to style, and every style after the split
+    /// would land one paragraph too early. One `StyledParagraph` is one Pages paragraph,
+    /// always.
+    public func optionalParagraphs(_ name: String) throws -> [StyledParagraph]? {
+        guard let raw = values[name] else { return nil }
+        guard let entries = raw.arrayValue else {
+            throw ToolError.badArgument(name: name, reason: "an array was expected")
+        }
+        guard !entries.isEmpty else {
+            throw ToolError.badArgument(
+                name: name,
+                reason: "it is empty. A document with no paragraphs cannot be told apart "
+                    + "from a mistake.")
+        }
+
+        return try entries.enumerated().map { index, entry in
+            guard let object = entry.objectValue else {
+                throw ToolError.badArgument(
+                    name: name, reason: "entry \(index) is not an object")
+            }
+            guard let text = object["text"]?.stringValue, !text.isEmpty else {
+                throw ToolError.badArgument(
+                    name: name, reason: "entry \(index) is missing non-empty 'text'")
+            }
+            guard !text.contains("\n") else {
+                throw ToolError.badArgument(
+                    name: name,
+                    reason: "entry \(index)'s text contains a newline. Each array entry is "
+                        + "one Pages paragraph — split multi-line content into separate "
+                        + "entries instead.")
+            }
+            let styleName = object["style"]?.stringValue ?? ParagraphStyle.body.rawValue
+            guard let style = ParagraphStyle(rawValue: styleName) else {
+                let options = ParagraphStyle.allCases.map(\.rawValue).joined(separator: ", ")
+                throw ToolError.badArgument(
+                    name: name,
+                    reason: "entry \(index) has style \"\(styleName)\", expected one of "
+                        + options)
+            }
+            return StyledParagraph(text: text, style: style)
+        }
     }
 }

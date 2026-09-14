@@ -125,15 +125,38 @@ typedef NS_ERROR_ENUM(PagesBridgeErrorDomain, PagesBridgeError){
                            error:(NSError **)error;
 
 /// Exports the open document to `path` in `format`, one of "pdf", "word", "epub", "rtf",
-/// "plain_text" or "pages09". Pages' own sandbox only accepts destinations under Desktop,
-/// Documents or Downloads (or another folder the person has separately granted); a path
-/// outside that is refused by Pages itself, and the failure is surfaced rather than
-/// papered over.
+/// "plain_text" or "pages09". `path` must end in the extension that format expects
+/// (checked here before sending anything) — `exportTo:as:` reports success and writes
+/// nothing at all for a mismatched one, verified directly against the running app.
+/// Whatever narrower boundary Pages' own export sandbox draws beyond that, a real refusal
+/// is surfaced through `error` rather than papered over.
 + (nullable NSDictionary<NSString *, id> *)
     exportDocumentWithIdentifier:(NSString *)identifier
                             toPath:(NSString *)path
                             format:(NSString *)format
                              error:(NSError **)error;
+
+/// Creates a new, unsaved document exactly like `createDocumentWithTemplateName:
+/// initialBodyText:error:`, except the body is built from `paragraphs` — one dictionary per
+/// paragraph, each `{"text": NSString, "font": NSString, "size": NSNumber, "colorRed":
+/// NSNumber, "colorGreen": NSNumber, "colorBlue": NSNumber}` (the three color keys are all
+/// present or all absent — absent means "leave Pages' own default color alone"). Font,
+/// size and color are the whole of what Pages' dictionary exposes on a paragraph of rich
+/// text; deciding what "heading2" or "quote" maps to is `ParagraphStyle`'s job, in Swift,
+/// not this file's.
++ (nullable NSDictionary<NSString *, id> *)
+    createDocumentWithTemplateName:(nullable NSString *)templateName
+                   styledParagraphs:(NSArray<NSDictionary<NSString *, id> *> *)paragraphs
+                              error:(NSError **)error;
+
+/// Replaces the whole body of the open document identified by `identifier` with
+/// `paragraphs`, in the same shape as `createDocumentWithTemplateName:styledParagraphs:
+/// error:`. Whole-document replace only, for the same reason `PageStore.
+/// replaceStyledParagraphs` is replace-only — see its doc comment.
++ (nullable NSDictionary<NSString *, id> *)
+    setStyledParagraphs:(NSArray<NSDictionary<NSString *, id> *> *)paragraphs
+    ofDocumentWithIdentifier:(NSString *)identifier
+                        error:(NSError **)error;
 
 @end
 

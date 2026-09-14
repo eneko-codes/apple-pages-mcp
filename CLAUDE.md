@@ -69,11 +69,33 @@ open document (same window, same content) returned a different `id` from `docume
 after being saved. `ToolError.notFound`'s message says so; do not "fix" a test or a bug
 report that assumes an id is a permanent handle the way it would be for a database row.
 
+**A paragraph's font/size/color can be set directly on the indexed specifier — no `-get`
+first, unlike the document lookup above.** `richText.paragraphs[i]` from
+`[document.bodyText.paragraphs objectAtIndex:i]` is *also* an unresolved specifier by the
+same "whose"-style reasoning, but calling `-get` on *this one* eagerly coerces it to its
+own plain-text `NSString` (verified live) — a value with no `font`/`size`/`color`
+properties at all. Setting those three directly on the unresolved paragraph specifier
+works and is correct; resolving first is not the fix here, it is a different bug. See
+`applyStyledParagraphs:toDocument:` and the doc comment on `PagesRichTextParagraph`.
+
+**Creating anything other than the top-level `document` object is not possible through
+Pages' scripting interface, at all.** Verified live: `make new table`, `make new shape`
+and `make new placeholder text` all failed identically with "AppleEvent handler failed" —
+tried against three different classes and several location variants (`at end of d`, `at
+end of tables of d`, `with properties {row count:3, ...}`), all the same failure, and the
+identical AppleScript command fails the same way, so this is not an Objective-C bridging
+problem. Pages declares `table`/`shape`/`image`/`chart` as elements in its dictionary for
+*reading* — `document_get` reports their counts — but the app's own Apple Event handlers
+for creating them do not exist. Do not spend more time on "make new table" syntax
+variants; the ceiling is real and this project's own live testing already covers it. If
+Apple ever ships real support, the entry point would be a new `PagesBridge` method
+alongside `applyStyledParagraphs:toDocument:`, not a fix to it.
+
 ## Native surface not used
 
 `sdef "/Applications/Pages Creator Studio.app"` is the authority on what is possible here — or generate the real Objective-C header with `sdp -fh` before hand-declaring a new protocol member, and check it against the running app the way the comment at the top of `PagesBridge.m` describes.
 
-- Table, cell, shape, image and chart manipulation — the dictionary exposes plenty (sort, merge, cell values and formulas, rotation, opacity...) and none of it is wired up. `document_get` reports counts only.
+- Table, shape, image and chart **creation** — confirmed impossible; see the finding above. Cell values, sort/merge, rotation, opacity and the rest of what the dictionary exposes for objects that already exist are still unwired, but there is no way to create one to test them against, either.
 - `set password` / `remove password` — exist in the dictionary. Not exposed: this server refuses password-protected documents outright rather than handle a password as an argument, matching `apple-pdf-mcp`'s stance on encrypted PDFs.
 - The `TPDocumentBackgroundExportIntent` Shortcuts action (export a closed document to PDF/Word without opening it) — a real capability gap the sdef `export` command can't fill, decoded from `Metadata.appintents/extract.actionsdata` in the app bundle. Not built: it needs a `.shortcut` a person installs by hand (`shortcuts` has no import command), and there is no existing Shortcuts-invocation pattern anywhere in this project's sibling repos to mirror. Worth adding later, deliberately, not as an afterthought.
 - Application-level `selection` and any window property — reading what the owner has on screen, or moving their windows, is not this server's business.

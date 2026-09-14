@@ -20,12 +20,22 @@ public enum PagesMCPServer {
         open right now. Workflow: documents_list to see what is open, open_document for \
         a file that is not, then document_get for its content.
 
-        document_get returns PLAIN TEXT. Pages' own dictionary types body text as rich \
-        text with no scriptable string form of the formatting, so there is no "ask for \
-        the markup instead" option the way note_get has html=true.
+        document_get returns PLAIN TEXT and never reports paragraph styling — Pages' own \
+        dictionary types body text as rich text with no scriptable string form of the \
+        formatting, so there is no "ask for the markup instead" option the way note_get \
+        has html=true, and no way to read back what style a paragraph was given.
 
         update_document requires an explicit mode. "append" adds to the end; "replace" \
         DISCARDS the whole body and cannot be undone from here.
+
+        create_document and update_document (replace mode only) accept 'paragraphs' as \
+        an alternative to plain-text 'body': one entry per paragraph, each styled as \
+        title/heading1/heading2/heading3/quote/body via a fixed font/size/color preset — \
+        the entire scriptable surface Pages exposes for a paragraph of rich text. quote \
+        is an approximation (italic, grey); Pages has no real block quote. Tables, \
+        shapes, images and charts cannot be created through Pages' scripting interface \
+        at all — confirmed live, not merely unimplemented here — so there is no tool for \
+        any of them.
 
         Password-protected documents are listed but refused by every tool that would \
         read, write or export one — this server never accepts a password as an \

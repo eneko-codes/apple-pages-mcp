@@ -37,6 +37,9 @@ Not affiliated with or endorsed by Apple Inc.
 - **`save_document` and `export_document` require `confirm=true` to overwrite an existing file.** `close_document` requires it for `saving=true`.
 - **Pages autosaves.** A brand-new document is written into iCloud Drive by Pages itself within seconds of creation — before any explicit save, and independently of whether you ever call `save_document`. Closing it with `saving=false` does not undo that. If you made something disposable, delete the file yourself (through the filesystem server, or Finder) — this server has no delete tool of any kind.
 - **No delete tool, anywhere.** Removing a `.pages` file from disk is the filesystem server's job, not this one's.
+- **A document's `id` can change while it stays open.** Observed live: the same window's id changed after a save. Re-run `documents_list` rather than assuming an id from an earlier call still resolves.
+- **`export_document`'s destination must end in the right extension for the format** (`.pdf`, `.docx`, `.epub`, `.rtf`, `.txt`, `.pages` for `pages09`). Pages' own export command reports success and writes nothing at all when the extension doesn't match — this server checks the file actually landed and refuses upfront when the extension is wrong, but the requirement itself comes from Pages, not from here.
+- **`save_document` to a new path is the least reliable call in this server.** Verified live: redirecting an already-saved document to a different path can report success while writing nothing. This server verifies the destination file actually exists afterwards and fails honestly when it doesn't; `export_document` with `format: "pages09"` is the more dependable way to get a copy onto disk at a new path.
 
 ## Install
 
@@ -112,8 +115,10 @@ One wrinkle specific to Pages: `body text` is typed as rich text, not plain text
 - No markup access — `document_get` is plain text only, with no formatted alternative.
 - No table, shape, image or chart editing — counts only.
 - No password handling of any kind — a locked document is refused, not decrypted.
-- Opening a password-protected file, or closing a never-saved document with `saving=true`, makes Pages show its own blocking dialog; `open_document` documents the risk, and `close_document` refuses the second case outright rather than risk hanging.
-- Exporting is bound by Pages' own sandbox: only Desktop, Documents, Downloads, or a folder separately granted.
+- Opening a password-protected file, or saving/closing a never-saved document, can make Pages show its own blocking dialog. `close_document` refuses `saving=true` on a never-saved document outright; the same risk exists for `save_document`'s first save of a brand-new document and is not fully closed off, only bounded — every Apple event this server sends has a 30-second timeout (Pages' own default is closer to two minutes), so a stuck call fails with a clear error instead of hanging the whole way there.
+- `save_document` to a new path is unreliable for a document that already has one — see "The rules worth knowing" above. `export_document` (format `pages09`) is the dependable alternative.
+- The exact boundary of Pages' own export sandbox was not fully mapped — plain `/tmp` and a fresh home-directory folder both worked in testing, wider than Desktop/Documents/Downloads. `export_document` verifies the file actually landed rather than trusting Pages' own report, so a real restriction still surfaces as an honest error.
+- A document's `id` is not guaranteed stable for the life of the window — see above.
 
 ## Development
 
@@ -122,7 +127,7 @@ swift build
 swift test
 ```
 
-28 tests, all against an in-memory fake — no test here sends an Apple event or touches a real document. Full verification against real Pages remains the **owner's** job, by hand, with MCP Inspector. `verification.md` is the script for it.
+28 tests, all against an in-memory fake — no test here sends an Apple event or touches a real document. That fake cannot reach the bugs `verification.md` is really for: this project's first live run against real Pages surfaced a genuine crash (`objc_retain` on a lazy "whose" specifier — see `PagesBridge.m`'s `documentWithIdentifier:ofApplication:`) and a silent no-op in Pages' own `save`/`export` commands, neither of which any amount of fixture-based testing could have caught. `verification.md` is the script for it.
 
 ## Licence
 

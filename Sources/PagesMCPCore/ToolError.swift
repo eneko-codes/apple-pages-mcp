@@ -29,6 +29,11 @@ public enum ToolError: Error, Equatable {
                 Pages only knows about documents open right now — there is no library to \
                 search the way Notes has folders. Call documents_list to see what is \
                 actually open, or open_document if the file you mean is not open yet.
+
+                A document's id can change on its own while it stays open the whole time \
+                — observed live during this server's own testing, right after a save. If \
+                you held on to an id from an earlier documents_list, call it again rather \
+                than assuming the document closed.
                 """
 
         case .templateNotFound(let name, let available):

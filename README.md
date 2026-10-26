@@ -1,10 +1,12 @@
-<p align="center"><img src="extension/icon.png" width="128" height="128" alt=""></p>
+<p align="center">
+  <img src="extension/icon.png" width="128" height="128" alt="apple-pages-mcp icon">
+</p>
 
 # apple-pages-mcp
 
 A local MCP server, written in Swift, that gives [Claude](https://claude.ai) access to the [Pages](https://www.apple.com/pages/) app on this Mac — reading, creating, editing and exporting documents through Apple events.
 
-Pages has no framework a separate process can use, so this server drives Pages.app itself — the same route [apple-notes-mcp](https://github.com/eneko-codes/apple-notes-mcp) takes for Notes. The App Store now lists the app as **"Pages Creator Studio"**; that is a display-name change Apple made, not a different app — its bundle identifier, scripting dictionary and everything this server talks to are unchanged.
+Pages has no framework a separate process can use, so this server drives Pages.app itself. The App Store now lists the app as **"Pages Creator Studio"**; that is a display-name change Apple made, not a different app — its bundle identifier, scripting dictionary and everything this server talks to are unchanged.
 
 Not affiliated with or endorsed by Apple Inc.
 
@@ -28,16 +30,27 @@ Not affiliated with or endorsed by Apple Inc.
 | `close_document` | **destructive** | Close, discarding changes by default |
 | `export_document` | write | Export to PDF, Word, EPUB, RTF, plain text or Pages '09 |
 
+## Frameworks and APIs
+
+Pages ships no framework an external process can use, so everything here is an Apple event
+sent to Pages itself.
+
+| Used | For | Reference |
+|---|---|---|
+| ScriptingBridge — `SBApplication`, `SBObject`, `classForScriptingClass:`, `sendEvent:id:parameters:` | Every read and write, in `Sources/PagesBridge/PagesBridge.m` | [ScriptingBridge](https://developer.apple.com/documentation/scriptingbridge) |
+| AppKit — `NSRunningApplication` | Whether Pages is running | [AppKit](https://developer.apple.com/documentation/appkit) |
+| `NSAppleEventsUsageDescription` | The consent string macOS shows for Automation | [Information Property List](https://developer.apple.com/documentation/bundleresources/information-property-list/nsappleeventsusagedescription) |
+
 ## The rules worth knowing before you use it
 
-- **Pages has no library.** Unlike Notes' folders, Pages only knows about documents open right now — there is nothing to search. `documents_list` shows what's open; `open_document` opens a file that isn't.
+- **Pages has no library.** Pages only knows about documents open right now — there is nothing to search. `documents_list` shows what's open; `open_document` opens a file that isn't.
 - **`document_get` returns plain text, with no markup option.** Pages' own dictionary types `body text` as rich text with no scriptable string form of the formatting — there is no `html=true` equivalent the way Notes has one. Styling is write-only: you can set a paragraph's look with `paragraphs`, but reading a document back never tells you what style a paragraph has.
 - **`paragraphs` gives `create_document`/`update_document` visual styling — headings, quotes — built from font/size/color, not from Pages' own named paragraph styles.** One entry per paragraph, each with a `style` (`title`, `heading1`–`heading3`, `quote`, `body`) mapped to a fixed preset — the entire scriptable surface of a Pages paragraph, confirmed live. It is **not** the same thing as picking "Heading" from Pages' own Format sidebar: confirmed live that no named-style property is scriptable at all (tried `style`, `paragraph style`, and more — see `CLAUDE.md`). A paragraph styled this way **will not appear in a Table of Contents** (built from real named heading styles) and **will not respond to a theme change** — it is indistinguishable, to Pages itself, from selecting text and bumping its font size by hand. `quote` is likewise an approximation (italic, grey); Pages has no real block quote to draw. Tables, shapes, images and charts cannot be created through Pages' scripting interface **at all** — confirmed live, not merely unimplemented (see "Known limits").
 - **`update_document` requires an explicit `mode`.** `append` keeps everything already there; `replace` discards the whole body and cannot be undone from here.
-- **Password-protected documents are refused outright.** No tool here reads, writes or exports a document Pages reports as locked, and none accepts a password as an argument — the same policy [apple-pdf-mcp](https://github.com/eneko-codes) uses for encrypted PDFs.
+- **Password-protected documents are refused outright.** No tool here reads, writes or exports a document Pages reports as locked, and none accepts a password as an argument.
 - **`save_document` and `export_document` require `confirm=true` to overwrite an existing file.** `close_document` requires it for `saving=true`.
-- **Pages autosaves.** A brand-new document is written into iCloud Drive by Pages itself within seconds of creation — before any explicit save, and independently of whether you ever call `save_document`. Closing it with `saving=false` does not undo that. If you made something disposable, delete the file yourself (through the filesystem server, or Finder) — this server has no delete tool of any kind.
-- **No delete tool, anywhere.** Removing a `.pages` file from disk is the filesystem server's job, not this one's.
+- **Pages autosaves.** A brand-new document is written into iCloud Drive by Pages itself within seconds of creation — before any explicit save, and independently of whether you ever call `save_document`. Closing it with `saving=false` does not undo that. If you made something disposable, delete the file yourself (in Finder) — this server has no delete tool of any kind.
+- **No delete tool, anywhere.** Removing a `.pages` file from disk is not something this server can do.
 - **A document's `id` can change while it stays open.** Observed live: the same window's id changed after a save. Re-run `documents_list` rather than assuming an id from an earlier call still resolves.
 - **`export_document`'s destination must end in the right extension for the format** (`.pdf`, `.docx`, `.epub`, `.rtf`, `.txt`, `.pages` for `pages09`). Pages' own export command reports success and writes nothing at all when the extension doesn't match — this server checks the file actually landed and refuses upfront when the extension is wrong, but the requirement itself comes from Pages, not from here.
 - **`save_document` to a new path is the least reliable call in this server.** Verified live: redirecting an already-saved document to a different path can report success while writing nothing. This server verifies the destination file actually exists afterwards and fails honestly when it doesn't; `export_document` with `format: "pages09"` is the more dependable way to get a copy onto disk at a new path.
@@ -106,7 +119,7 @@ Don't run both registrations at once — Pages would get two Automation subjects
 
 ## Implementation note: why the Apple events are in Objective-C
 
-Apple documents exactly one way to create a scriptable object: `classForScriptingClass:`, `alloc`/`initWithProperties:`, then insert it into the container's element array. The class that comes back is an `SBPseudoClass`, and a Swift metatype cast against it aborts the process ([swiftlang/swift#43407](https://github.com/swiftlang/swift/issues/43407), open since 2016). In Objective-C the documented pattern just compiles. See `Sources/PagesBridge/PagesBridge.m` — and its sibling in [apple-notes-mcp](https://github.com/eneko-codes/apple-notes-mcp), which this project mirrors exactly.
+Apple documents exactly one way to create a scriptable object: `classForScriptingClass:`, `alloc`/`initWithProperties:`, then insert it into the container's element array. The class that comes back is an `SBPseudoClass`, and a Swift metatype cast against it aborts the process ([swiftlang/swift#43407](https://github.com/swiftlang/swift/issues/43407), open since 2016). In Objective-C the documented pattern just compiles. See `Sources/PagesBridge/PagesBridge.m`.
 
 One wrinkle specific to Pages: `body text` is typed as rich text, not plain text, in Pages' own dictionary — confirmed by generating Apple's real `sdp`-produced header and by a live probe against the running app. Reading it as a string needs the explicit `as text` coercion AppleScript performs automatically, sent by hand through `SBObject`'s public `sendEvent:id:parameters:`. The bridge does this once, in one place; nothing above that seam ever sees the rich text object.
 
@@ -128,7 +141,7 @@ swift build
 swift test
 ```
 
-28 tests, all against an in-memory fake — no test here sends an Apple event or touches a real document. That fake cannot reach the bugs `verification.md` is really for: this project's first live run against real Pages surfaced a genuine crash (`objc_retain` on a lazy "whose" specifier — see `PagesBridge.m`'s `documentWithIdentifier:ofApplication:`) and a silent no-op in Pages' own `save`/`export` commands, neither of which any amount of fixture-based testing could have caught. `verification.md` is the script for it.
+The tests run entirely against an in-memory fake — no test here sends an Apple event or touches a real document. That fake cannot reach the bugs `verification.md` is really for: this project's first live run against real Pages surfaced a genuine crash (`objc_retain` on a lazy "whose" specifier — see `PagesBridge.m`'s `documentWithIdentifier:ofApplication:`) and a silent no-op in Pages' own `save`/`export` commands, neither of which any amount of fixture-based testing could have caught. `verification.md` is the script for it.
 
 ## Licence
 

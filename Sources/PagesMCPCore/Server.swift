@@ -4,7 +4,7 @@ import MCP
 public enum PagesMCPServer {
 
     public static let name = "apple-pages-mcp"
-    public static let version = "1.0.0"
+    public static let version = "1.0.1"
 
     /// Returned from `initialize`. It carries what per-tool descriptions cannot state
     /// once: the id workflow, the two rules that surprise people, and where policy lives.

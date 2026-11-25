@@ -1,10 +1,9 @@
 import Foundation
-import MCP
 
 public enum PagesMCPServer {
 
     public static let name = "apple-pages-mcp"
-    public static let version = "1.0.1"
+    public static let version = "1.0.2"
 
     /// Returned from `initialize`. It carries what per-tool descriptions cannot state
     /// once: the id workflow, the two rules that surprise people, and where policy lives.
@@ -82,26 +81,18 @@ public enum PagesMCPServer {
     public static func run(
         store: (any PageStore)? = nil,
         configuration: Configuration = Configuration()
-    ) async throws {
+    ) async {
         let store = store ?? ScriptingBridgePageStore()
-        let tools = PageTools(store: store, configuration: configuration)
-        let server = Server(
-            name: name,
-            version: version,
-            instructions: instructions,
-            capabilities: .init(tools: .init(listChanged: false))
-        )
-
-        await server.withMethodHandler(ListTools.self) { _ in
-            .init(tools: ToolCatalog.all(configuration))
-        }
-        await server.withMethodHandler(CallTool.self) { await tools.handle($0) }
-
-        // The default StdioTransport logger is a no-op handler. Leave it that way: a
-        // logger writing to stdout would interleave with the JSON-RPC stream and break
-        // every response after the first log line.
         Diagnostics.started(version: version)
-        try await server.start(transport: StdioTransport())
-        await server.waitUntilCompleted()
+        await serveStandardStreams(
+            handler: handler(
+                tools: PageTools(store: store, configuration: configuration),
+                configuration: configuration))
+    }
+
+    public static func handler(tools: PageTools, configuration: Configuration) -> MCPHandler {
+        MCPHandler(
+            name: name, version: version, instructions: instructions,
+            catalog: ToolCatalog.all(configuration), tools: tools)
     }
 }

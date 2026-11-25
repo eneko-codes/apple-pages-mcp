@@ -15,6 +15,12 @@ final class FakePageStore: PageStore, @unchecked Sendable {
     /// Set to make the next call fail, so the error path is reachable.
     var failure: (any Error)?
 
+    /// Set to make a read never answer, as Pages does while it shows a dialog.
+    var hangs = false
+
+    /// The page range of every `fetch`, so a test can prove which pages were read.
+    private(set) var fetchedPages: [ClosedRange<Int>?] = []
+
     // Recorded so a test can prove what a tool actually asked the store to do.
     private(set) var created: [DocumentDraft] = []
     private(set) var opened: [String] = []
@@ -28,16 +34,22 @@ final class FakePageStore: PageStore, @unchecked Sendable {
 
     func documents() async throws -> [DocumentSummary] {
         if let failure { throw failure }
+        if hangs { await withCheckedContinuation { (_: CheckedContinuation<Void, Never>) in } }
+        // In no useful order, as Pages hands them over: the tool is what orders them.
         return documentsValue.values.map(\.summary)
     }
 
-    func fetch(identifier: String, includePageTexts: Bool) async throws -> DocumentDetail? {
+    func fetch(identifier: String, pages: ClosedRange<Int>?) async throws -> DocumentDetail? {
         if let failure { throw failure }
+        fetchedPages.append(pages)
         guard let document = documentsValue[identifier] else { return nil }
-        guard includePageTexts else {
+        guard let pages else {
             return DocumentDetail(summary: document.summary, bodyText: document.bodyText)
         }
-        return document
+        let asked = (document.pageTexts ?? []).enumerated()
+            .filter { pages.contains($0.offset + 1) }.map(\.element)
+        return DocumentDetail(
+            summary: document.summary, bodyText: document.bodyText, pageTexts: asked)
     }
 
     func installedTemplateNames() async throws -> [String] {
@@ -126,6 +138,23 @@ final class FakePageStore: PageStore, @unchecked Sendable {
     }
 }
 
+// MARK: - Calling a tool
+
+struct ToolResult {
+    var text: String
+    var isError: Bool
+}
+
+/// One `tools/call` against a double, as the dispatch answers it.
+func call(
+    _ name: String, _ arguments: [String: Value] = [:], store: FakePageStore = FakePageStore(),
+    timeout: Duration = PageTools.defaultTimeout
+) async -> ToolResult {
+    let output = await PageTools(store: store, timeout: timeout)
+        .handle(.init(name: name, arguments: arguments))
+    return ToolResult(text: output.text, isError: output.isError)
+}
+
 // MARK: - Fixtures
 
 enum Fixtures {
@@ -133,15 +162,16 @@ enum Fixtures {
     /// Invented throughout. Nothing here is taken from the owner's real documents.
     static func document(
         id: String, name: String, text: String, path: String? = nil, locked: Bool = false,
-        templateName: String? = nil
+        templateName: String? = nil, pageTexts: [String]? = nil
     ) -> DocumentDetail {
         DocumentDetail(
             summary: DocumentSummary(
-                identifier: id, name: name, path: path, pageCount: max(1, text.count / 2000),
+                identifier: id, name: name, path: path,
+                pageCount: pageTexts?.count ?? max(1, text.count / 2000),
                 sectionCount: 1, tableCount: 0, imageCount: 0, chartCount: 0,
                 isPasswordProtected: locked, hasBodyText: !text.isEmpty, hasFacingPages: false,
                 isModified: path == nil, templateName: templateName),
-            bodyText: locked ? "" : text)
+            bodyText: locked ? "" : text, pageTexts: pageTexts)
     }
 
     static func withPath(_ summary: DocumentSummary, path: String) -> DocumentSummary {

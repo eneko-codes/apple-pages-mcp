@@ -67,11 +67,15 @@ typedef NS_ERROR_ENUM(PagesBridgeErrorDomain, PagesBridgeError){
 + (nullable NSArray<NSDictionary<NSString *, id> *> *)openDocumentsWithError:(NSError **)error;
 
 /// One open document by its Pages-assigned identifier, with the same shape as one entry
-/// above plus `bodyText` and, when `includePageTexts` is `YES`, `pageTexts` — one plain
-/// text string per page, in document order.
+/// above plus `bodyText` and, when `firstPage` is at least 1, `pageTexts` — one plain text
+/// string for each page numbered `firstPage` to `lastPage` that exists, in document order.
+/// Pages are numbered from one and both ends are included; pass 0 and 0 for no page texts.
+/// Each page read is one more Apple event, which is why the caller names the pages it
+/// wants instead of always getting them all.
 + (nullable NSDictionary<NSString *, id> *)
     documentWithIdentifier:(NSString *)identifier
-           includePageTexts:(BOOL)includePageTexts
+                  firstPage:(NSInteger)firstPage
+                   lastPage:(NSInteger)lastPage
                        error:(NSError **)error;
 
 /// Every installed template's display name, for resolving `templateName` below and for

@@ -20,11 +20,11 @@ Not affiliated with or endorsed by Apple Inc.
 
 | Tool | Kind | What it does |
 |---|---|---|
-| `pages_status` | read | Availability, Automation permission, configured limits |
-| `documents_list` | read | Every document currently open in Pages |
-| `document_get` | read | One open document's body text and structure |
+| `pages_status` | read | Availability, Automation permission, the sizes and deadline in force |
+| `documents_list` | read | The documents open in Pages, a page at a time in name order |
+| `document_get` | read | One open document's structure and its body text, a window at a time, or the text of a range of pages |
 | `create_document` | write | New document, optional template, initial body as plain text or styled paragraphs |
-| `open_document` | write | Opens an existing `.pages` file by path |
+| `open_document` | write | Opens an existing `.pages` file by path and returns its id |
 | `update_document` | write | Append (plain text) or replace (plain text or styled paragraphs) a document's body |
 | `save_document` | write | Save, in place or to a new path |
 | `close_document` | **destructive** | Close, discarding changes by default |
@@ -44,6 +44,8 @@ sent to Pages itself.
 ## The rules worth knowing before you use it
 
 - **Pages has no library.** Pages only knows about documents open right now — there is nothing to search. `documents_list` shows what's open; `open_document` opens a file that isn't.
+- **Every result is bounded, and says what it left out.** `document_get` returns the first 10,000 characters of the body; when there is more, the first lines of the result say how long the body is and the `character_offset` that returns the rest, and `max_characters` sets the size of a window, up to 20,000. `first_page` and `last_page` (numbered from 1, both included, one alone running to the end) return the text of those pages instead, each under a `[page N]` heading, through the same window; every page read is one more Apple event. `documents_list` returns 25 documents to a page, in name order, and `limit` (up to 100) and `offset` reach the rest. A size or an offset outside its range, or a page number past the last page, is moved to the nearest allowed value and the first lines say which one was used; a value of the wrong type, or a `last_page` before `first_page`, is refused. The sizes are constants in `ToolCatalog.swift`, which the schemas, the descriptions and the instructions quote. No result is longer than `ToolStandard.longestResult`: each tool keeps to that itself, and the protocol layer cuts, with a notice, any result that did not.
+- **Every call has a deadline.** One that has not finished after 60 seconds is abandoned and answered with an error. An Apple event already sent cannot be recalled, so a write may still take effect: check with `documents_list` or `document_get` before repeating it.
 - **`document_get` returns plain text, with no markup option.** Pages' own dictionary types `body text` as rich text with no scriptable string form of the formatting — there is no `html=true` equivalent the way Notes has one. Styling is write-only: you can set a paragraph's look with `paragraphs`, but reading a document back never tells you what style a paragraph has.
 - **`paragraphs` gives `create_document`/`update_document` visual styling — headings, quotes — built from font/size/color, not from Pages' own named paragraph styles.** One entry per paragraph, each with a `style` (`title`, `heading1`–`heading3`, `quote`, `body`) mapped to a fixed preset — the entire scriptable surface of a Pages paragraph, confirmed live. It is **not** the same thing as picking "Heading" from Pages' own Format sidebar: confirmed live that no named-style property is scriptable at all (tried `style`, `paragraph style`, and more — see `CLAUDE.md`). A paragraph styled this way **will not appear in a Table of Contents** (built from real named heading styles) and **will not respond to a theme change** — it is indistinguishable, to Pages itself, from selecting text and bumping its font size by hand. `quote` is likewise an approximation (italic, grey); Pages has no real block quote to draw. Tables, shapes, images and charts cannot be created through Pages' scripting interface **at all** — confirmed live, not merely unimplemented (see "Known limits").
 - **`update_document` requires an explicit `mode`.** `append` keeps everything already there; `replace` discards the whole body and cannot be undone from here.
@@ -103,7 +105,7 @@ MCPB_HARDENED=1 MCPB_SIGN_IDENTITY="..." bash scripts/pack.sh
 
 ## Tool switches
 
-Every tool has its own on/off switch in Claude Desktop, populated from `extension/manifest.json`'s `tools` array before the server has ever run. There is no other configuration: numeric limits (like how much body text `document_get` returns by default) are fixed sensible constants in `Configuration.swift`, not settings — the only thing to decide is which tools are on.
+Every tool has its own on/off switch in Claude Desktop, populated from `extension/manifest.json`'s `tools` array before the server has ever run. There is no other configuration: the sizes (how much body text `document_get` returns in one window, how many documents `documents_list` puts on a page) are constants in `ToolCatalog.swift`, not settings — the only thing to decide is which tools are on.
 
 ## Manual registration instead
 
@@ -130,10 +132,12 @@ One wrinkle specific to Pages: `body text` is typed as rich text, not plain text
 ## Known limits
 
 - No library or search — only documents already open, or opened by path.
+- No tool lists the installed templates. `create_document` with a name Pages does not have answers with the closest eight and a count of the others; the template chooser in Pages shows them all.
+- A window or a page range is a new reading of the document each time. If the document is edited between two calls, the second window is cut from the new text.
 - No markup access — `document_get` is plain text only, with no formatted alternative.
 - No table, shape, image or chart creation — confirmed impossible, not merely unimplemented. Live-tested: `make new table`, `make new shape` and `make new placeholder text` all fail identically with "AppleEvent handler failed", via both the Objective-C bridge and plain AppleScript, across several location/property variants. Pages declares these as elements for *reading* — `document_get` reports their counts — but ships no working "make" handler for any of them. No editing of ones that already exist, either.
 - No password handling of any kind — a locked document is refused, not decrypted.
-- Opening a password-protected file, or saving/closing a never-saved document, can make Pages show its own blocking dialog. `close_document` refuses `saving=true` on a never-saved document outright; the same risk exists for `save_document`'s first save of a brand-new document and is not fully closed off, only bounded — every Apple event this server sends has a 30-second timeout (Pages' own default is closer to two minutes), so a stuck call fails with a clear error instead of hanging the whole way there.
+- Opening a password-protected file, or saving/closing a never-saved document, can make Pages show its own blocking dialog. `close_document` refuses `saving=true` on a never-saved document outright; the same risk exists for `save_document`'s first save of a brand-new document and is not fully closed off, only bounded — every Apple event this server sends has a 30-second timeout (Pages' own default is closer to two minutes), and every call a 60-second deadline, so a stuck call fails with a clear error instead of hanging the whole way there.
 - `save_document` to a new path is unreliable for a document that already has one — see "The rules worth knowing" above. `export_document` (format `pages09`) is the dependable alternative.
 - The exact boundary of Pages' own export sandbox was not fully mapped — plain `/tmp` and a fresh home-directory folder both worked in testing, wider than Desktop/Documents/Downloads. `export_document` verifies the file actually landed rather than trusting Pages' own report, so a real restriction still surfaces as an honest error.
 - A document's `id` is not guaranteed stable for the life of the window — see above.

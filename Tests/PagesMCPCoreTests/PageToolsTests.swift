@@ -11,10 +11,9 @@ struct PageToolsTests {
 
     private func call(
         _ name: String, _ arguments: [String: Value] = [:],
-        store: FakePageStore = FakePageStore(),
-        configuration: Configuration = Configuration()
+        store: FakePageStore = FakePageStore()
     ) async -> (text: String, isError: Bool) {
-        let tools = PageTools(store: store, configuration: configuration)
+        let tools = PageTools(store: store)
         let result = await tools.handle(.init(name: name, arguments: arguments))
         guard case .text(let text) = result.content.first else {
             return ("(no text content)", true)

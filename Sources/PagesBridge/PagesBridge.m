@@ -230,7 +230,8 @@ static const OSType PagesExportFormatRTF = 'Prtf';
 
 + (nullable NSDictionary<NSString *, id> *)
     documentWithIdentifier:(NSString *)identifier
-           includePageTexts:(BOOL)includePageTexts
+                  firstPage:(NSInteger)firstPage
+                   lastPage:(NSInteger)lastPage
                        error:(NSError **)error {
     SBApplication<PagesApplication> *application = [self applicationWithError:error];
     if (!application) return nil;
@@ -243,9 +244,16 @@ static const OSType PagesExportFormatRTF = 'Prtf';
 
     NSMutableDictionary<NSString *, id> *detail = [[self summaryOfDocument:document] mutableCopy];
     detail[@"bodyText"] = [self plainText:document.bodyText];
-    if (includePageTexts) {
+    if (firstPage >= 1 && lastPage >= firstPage) {
         NSMutableArray<NSString *> *pageTexts = [NSMutableArray array];
+        // The pages are walked exactly as before, by fast enumeration, which is the access
+        // verified against the running app. A page outside the range is only skipped, so
+        // it costs no Apple event of its own: the event is the text coercion.
+        NSInteger number = 0;
         for (id<PagesPage> page in document.pages) {
+            number += 1;
+            if (number < firstPage) continue;
+            if (number > lastPage) break;
             [pageTexts addObject:[self plainText:page.bodyText]];
         }
         detail[@"pageTexts"] = pageTexts;
@@ -286,8 +294,7 @@ static const OSType PagesExportFormatRTF = 'Prtf';
         if (!match) {
             if (error) {
                 *error = [self errorWithCode:PagesBridgeErrorTemplateNotFound
-                                     message:[NSString stringWithFormat:@"No template '%@'.",
-                                                                        templateName]];
+                                     message:@"No installed template has that name."];
             }
             return nil;
         }
@@ -433,10 +440,8 @@ static const OSType PagesExportFormatRTF = 'Prtf';
     if (!opened) {
         if (error) {
             *error = [self errorWithCode:PagesBridgeErrorOpenRefused
-                                 message:[NSString stringWithFormat:
-                                                       @"Pages did not open '%@'. Check the "
-                                                        "path exists and is a Pages document.",
-                                                       path]];
+                                 message:@"Pages did not open the file at that path. Check "
+                                          "the path exists and is a Pages document."];
         }
         return nil;
     }
@@ -523,16 +528,12 @@ static const OSType PagesExportFormatRTF = 'Prtf';
                                        fileExistsAtPath:destination.path]) {
         if (error) {
             *error = [self errorWithCode:PagesBridgeErrorWriteRefused
-                                 message:[NSString stringWithFormat:
-                                                       @"Pages reported no error, but no file "
-                                                        "exists at '%@' afterwards. Pages' "
-                                                        "own \"save\" command is not reliable "
-                                                        "for redirecting an already-saved "
-                                                        "document to a new location — export_"
-                                                        "document is the verified route to "
-                                                        "get this document's content onto "
-                                                        "disk at a chosen path.",
-                                                       destination.path]];
+                                 message:@"Pages reported no error, but no file exists at the "
+                                          "destination afterwards. Pages' own \"save\" command "
+                                          "is not reliable for redirecting an already-saved "
+                                          "document to a new location — export_document is "
+                                          "the verified route to get this document's content "
+                                          "onto disk at a chosen path."];
         }
         return nil;
     }
@@ -641,11 +642,11 @@ static const OSType PagesExportFormatRTF = 'Prtf';
         if (error) {
             *error = [self errorWithCode:PagesBridgeErrorWriteRefused
                                  message:[NSString stringWithFormat:
-                                                       @"'%@' export needs a '.%@' "
-                                                        "destination, not '%@'. Pages "
-                                                        "reports no error for a mismatched "
-                                                        "extension — it just writes nothing.",
-                                                       format, expectedExtension, path]];
+                                                       @"'%@' export needs a destination "
+                                                        "ending in '.%@'. Pages reports no "
+                                                        "error for a mismatched extension — "
+                                                        "it just writes nothing.",
+                                                       format, expectedExtension]];
         }
         return nil;
     }
@@ -663,10 +664,8 @@ static const OSType PagesExportFormatRTF = 'Prtf';
     if (![[NSFileManager defaultManager] fileExistsAtPath:path]) {
         if (error) {
             *error = [self errorWithCode:PagesBridgeErrorWriteRefused
-                                 message:[NSString stringWithFormat:
-                                                       @"Pages reported no error, but no "
-                                                        "file exists at '%@' afterwards.",
-                                                       path]];
+                                 message:@"Pages reported no error, but no file exists at the "
+                                          "destination afterwards."];
         }
         return nil;
     }

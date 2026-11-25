@@ -31,22 +31,27 @@ public struct Format: Sendable {
         }.joined(separator: "\n")
     }
 
-    /// A document with no title of its own still needs something to print.
+    /// A document with no title of its own still needs something to print. A name is one
+    /// line: a file name may hold a line break, and a row or a heading may not.
     static func displayName(_ name: String) -> String {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = name.split(whereSeparator: \.isNewline).joined(separator: " ")
+            .trimmingCharacters(in: .whitespaces)
         return trimmed.isEmpty ? "(untitled)" : trimmed
     }
 
     // MARK: Containers
 
-    public func documents(_ documents: [DocumentSummary]) -> String {
-        guard !documents.isEmpty else {
+    /// `documents` is the page to show, already in order; `matching` counts every open
+    /// document. The page's position in the whole is the caller's notice, not this text.
+    public func documents(_ documents: [DocumentSummary], matching: Int) -> String {
+        guard matching > 0 else {
             return "No documents are open in Pages. Use open_document or create_document."
         }
         let width = documents.map { Self.displayName($0.name).count }.max() ?? 0
         var lines = [
-            "\(documents.count) document\(documents.count == 1 ? "" : "s") open in Pages:"
+            "\(matching) document\(matching == 1 ? "" : "s") open in Pages, ordered by name, then id:"
         ]
+        if documents.isEmpty { lines.append("   (nothing at this offset)") }
         for document in documents {
             var line = document.isPasswordProtected ? "🔒 " : "   "
             line += Self.pad(Self.displayName(document.name), to: width)
@@ -55,16 +60,31 @@ public struct Format: Sendable {
             line += document.isModified ? "  •unsaved changes" : ""
             lines.append(line + "  id=\(document.identifier)")
         }
-        lines.append("")
-        lines.append("🔒 marks a password-protected document: no tool here will touch it.")
+        if documents.contains(where: \.isPasswordProtected) {
+            lines.append("")
+            lines.append("🔒 marks a password-protected document: no tool here will touch it.")
+        }
         return lines.joined(separator: "\n")
     }
 
     // MARK: Documents
 
-    /// `text` is already truncated by the caller, which is where the limit lives so the
-    /// policy stays testable.
-    public func detail(_ document: DocumentDetail, text: String, truncated: Bool) -> String {
+    /// The text of a run of pages as it is listed and windowed: each page under a heading
+    /// with its number, `firstPage` being the number of the first one.
+    static func pageListing(_ texts: [String], firstPage: Int) -> String {
+        texts.enumerated().map { index, text in "[page \(firstPage + index)]\n\(text)" }
+            .joined(separator: "\n\n")
+    }
+
+    /// One document: what Pages reports about it, then one window of text. That text is
+    /// the body, or, when `firstPage` is given, the listing of `document.pageTexts`, whose
+    /// first entry is page `firstPage`. `characterOffset` and `maxCharacters` window it,
+    /// because it is the one part of the result with no natural bound.
+    public func detail(
+        _ document: DocumentDetail, firstPage: Int? = nil, characterOffset: Int,
+        maxCharacters: Int, notices: [String]
+    ) -> String {
+        var notices = notices
         let summary = document.summary
         var output = Self.displayName(summary.name) + "\n"
         output += Self.block([
@@ -90,20 +110,38 @@ public struct Format: Sendable {
                 This document is password protected. This server never reads, writes or \
                 exports a locked document's content — open it in Pages to read it there.
                 """
-            return output
+            return ToolStandard.withNotices(notices, output)
         }
 
-        output += "\n\n" + text
-        if truncated {
-            output += "\n\n[Cut at \(text.count) characters. Raise 'text_limit' to read more.]"
-        }
-        if let pageTexts = document.pageTexts {
-            output += "\n\n--- by page ---\n"
-            for (index, pageText) in pageTexts.enumerated() {
-                output += "\n[page \(index + 1)]\n\(pageText)\n"
+        let whole: String
+        let label: String
+        let empty: String
+        var pageRange: String?
+        if let firstPage, let pageTexts = document.pageTexts {
+            whole = Self.pageListing(pageTexts, firstPage: firstPage)
+            let lastPage = firstPage + pageTexts.count - 1
+            pageRange = "first_page=\(firstPage) and last_page=\(lastPage)"
+            switch pageTexts.count {
+            case 0: label = "Pages"
+            case 1: label = "Page \(firstPage)"
+            default: label = "Pages \(firstPage)–\(lastPage)"
             }
+            empty = "(this document has no pages)"
+        } else {
+            whole = document.bodyText
+            label = "Body"
+            empty = "(the body is empty)"
         }
-        return output
+        let window = ToolStandard.window(
+            of: whole, characterOffset: characterOffset, maxCharacters: maxCharacters, label: label)
+        if let position = window.notice { notices.append(position) }
+        // The window's own sentence names only character_offset, and that alone would
+        // return the next window of the body, not of these pages.
+        if let pageRange, max(characterOffset, 0) + window.text.count < whole.count {
+            notices.append("Keep \(pageRange) in that call.")
+        }
+        output += "\n\n" + (whole.isEmpty ? empty : window.text)
+        return ToolStandard.withNotices(notices, output)
     }
 
     // MARK: Write receipts
@@ -181,9 +219,7 @@ public struct Format: Sendable {
 
     // MARK: Status
 
-    public func status(_ state: PagesAvailability, binaryPath: String, configuration: Configuration)
-        -> String
-    {
+    public func status(_ state: PagesAvailability, binaryPath: String, deadline: Duration) -> String {
         let headline: String
         switch state {
         case .ready: headline = "Pages: RUNNING, automation permitted."
@@ -193,13 +229,24 @@ public struct Format: Sendable {
         case .consentNotGranted: headline = "Pages automation: not requested yet."
         }
 
+        let window = ToolCatalog.maxCharactersRange
+        let documents = ToolCatalog.documentLimitRange
         var text = headline + "\n\n"
         text += Self.block([
             ("binary", binaryPath),
             ("target", ScriptingBridgePageStore.bundleIdentifier),
             ("app display name", "\"Pages Creator Studio\" in System Settings and dialogs"),
             ("process", "pid \(ProcessInfo.processInfo.processIdentifier)"),
-            ("body text limit", "\(configuration.bodyTextLimit) characters"),
+            (
+                "document_get window",
+                "\(ToolCatalog.defaultMaxCharacters) characters by default, up to \(window.upperBound)"
+            ),
+            (
+                "documents_list page",
+                "\(ToolCatalog.defaultDocumentLimit) documents by default, up to \(documents.upperBound)"
+            ),
+            ("longest result", "\(ToolStandard.longestResult) characters"),
+            ("call deadline", "\(deadline.components.seconds) seconds"),
         ])
         if state != .ready {
             text += "\n\n" + ToolError.availabilityMessage(state)

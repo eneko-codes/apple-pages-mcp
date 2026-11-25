@@ -2,9 +2,9 @@
   "manifest_version": "0.3",
   "name": "apple-pages-mcp",
   "display_name": "Apple Pages",
-  "version": "1.0.2",
+  "version": "2.0.0",
   "description": "Read, create and export Apple Pages documents through the Pages app",
-  "long_description": "A local MCP server written in Swift that gives Claude access to the Pages app on this Mac.\n\nPages has no framework a separate process can use, so this server drives Pages itself through Apple events — the same route apple-notes-mcp takes for Notes. Pages must be running, and the grant appears under System Settings → Privacy & Security → Automation. The app may show as \"Pages Creator Studio\" there and in permission dialogs; that is a display-name change Apple made, not a different app.\n\nPages has no library the way Notes has folders — it only knows about documents open right now. documents_list shows what is open; open_document opens a file that is not.\n\nupdate_document makes you say whether you are appending or replacing. Silently replacing a whole document's body is the mistake worth designing against.\n\ncreate_document and update_document (replace mode) accept styled paragraphs — real headings and quotes, via font/size/color, the entire scriptable surface Pages exposes for a paragraph. Tables, shapes, images and charts cannot be created at all through Pages' scripting interface, confirmed live.\n\nPassword-protected documents are refused by every tool that would read, write or export one, and no tool accepts a password as an argument — the same policy apple-pdf-mcp uses for encrypted PDFs.\n\nNot affiliated with or endorsed by Apple Inc.",
+  "long_description": "A local MCP server written in Swift that gives Claude access to the Pages app on this Mac.\n\nPages has no framework a separate process can use, so this server drives Pages itself through Apple events — the same route apple-notes-mcp takes for Notes. Pages must be running, and the grant appears under System Settings → Privacy & Security → Automation. The app may show as \"Pages Creator Studio\" there and in permission dialogs; that is a display-name change Apple made, not a different app.\n\nPages has no library the way Notes has folders — it only knows about documents open right now. documents_list shows what is open; open_document opens a file that is not.\n\nEvery result is bounded. document_get returns the body one window at a time, or the text of a range of pages, and documents_list returns one page of documents; when a result does not hold everything, its first lines say how much there is and the exact arguments that return the rest (character_offset and max_characters, first_page and last_page, limit and offset). A size, an offset or a page number outside its range is moved to the nearest allowed value, and the result says which one was used. A call that has not finished after 60 seconds is abandoned and answered with an error that says so; a write already sent to Pages may still take effect.\n\nupdate_document makes you say whether you are appending or replacing. Silently replacing a whole document's body is the mistake worth designing against.\n\ncreate_document and update_document (replace mode) accept styled paragraphs — real headings and quotes, via font/size/color, the entire scriptable surface Pages exposes for a paragraph. Tables, shapes, images and charts cannot be created at all through Pages' scripting interface, confirmed live.\n\nPassword-protected documents are refused by every tool that would read, write or export one, and no tool accepts a password as an argument — the same policy apple-pdf-mcp uses for encrypted PDFs.\n\nNot affiliated with or endorsed by Apple Inc.",
   "author": {
     "name": "eneko-codes",
     "url": "https://github.com/eneko-codes"
@@ -35,15 +35,15 @@
   "tools": [
     {
       "name": "pages_status",
-      "description": "Reports whether Pages is running, whether this server may automate it, and what limits are in force. Touches no document."
+      "description": "Reports whether Pages is running, whether this server may automate it, and the sizes and deadline in force. Touches no document."
     },
     {
       "name": "documents_list",
-      "description": "Lists every document currently open in Pages, with its page count and whether it has unsaved changes."
+      "description": "Lists the documents open in Pages, one page at a time in name order, with page count and whether each has unsaved changes; limit and offset reach the rest."
     },
     {
       "name": "document_get",
-      "description": "Returns one open document's body text, page/section/table/image/chart counts, and whether it is password protected."
+      "description": "Returns one open document's page/section/table/image/chart counts, whether it is password protected, and its body as plain text one window at a time (character_offset, max_characters), or the text of a range of pages (first_page, last_page)."
     },
     {
       "name": "create_document",
@@ -51,7 +51,7 @@
     },
     {
       "name": "open_document",
-      "description": "Opens the Pages document at 'path'. Returns the same detail document_get would."
+      "description": "Opens the Pages document at 'path' and returns its name, path, page count and id. Its text is read with document_get."
     },
     {
       "name": "update_document",

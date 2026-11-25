@@ -30,9 +30,11 @@ starting `ZZTest-` — never reuse that prefix for anything you want to keep.
 | Step | Call | Expected |
 |---|---|---|
 | Open one ordinary document you don't mind reading (not editing) | — | — |
-| List open documents | `documents_list` | Shows it: name, page count, `id`. |
-| Read it | `document_get` with that `id` | Plain text body, counts, no markup. |
-| Read it with page breakdown | `document_get` with `by_page: true` | One string per page, `[page N]` markers. |
+| List open documents | `documents_list` | Shows it: name, page count, `id`, in name order. |
+| Read it | `document_get` with that `id` | Plain text body, counts, no markup. For a body over 10,000 characters the first line is `Body: characters 1–10000 of N. Pass character_offset=10000 for the rest.` |
+| Read the rest of a long body | `document_get` with `character_offset` set to the value the first line gave | Starts exactly where the first window ended. |
+| Read a range of pages | `document_get` with `first_page: 1`, `last_page: 2` | The text of pages 1 and 2 only, under `[page 1]` and `[page 2]` headings, and no later page. **New in 2.0.0 and not yet run against Pages**: the bridge now skips pages outside the range instead of reading every page. |
+| Ask past the last page | `document_get` with `last_page: 9999` | First line says `last_page=9999 is outside 1–N; N was used.` |
 | Read a nonexistent id | `document_get` with `id: "nope"` | Names "nope" in the refusal, suggests `documents_list`. |
 
 A document's `id` can change on its own while the same window stays open — observed live,

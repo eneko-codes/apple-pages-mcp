@@ -132,12 +132,14 @@ public struct ScriptingBridgePageStore: PageStore {
         return raw.map(summary(from:))
     }
 
-    public func fetch(identifier: String, includePageTexts: Bool) async throws -> DocumentDetail? {
+    public func fetch(identifier: String, pages: ClosedRange<Int>?) async throws -> DocumentDetail? {
         try guardAvailability()
         let raw: [String: Any]
         do {
+            // The bridge takes 0 and 0 for "no page texts": page numbers start at one.
             raw = try PagesBridge.document(
-                withIdentifier: identifier, includePageTexts: includePageTexts)
+                withIdentifier: identifier, firstPage: pages?.lowerBound ?? 0,
+                lastPage: pages?.upperBound ?? 0)
         } catch where isDocumentMissing(error) {
             // Not a failure: the owner can close a document between two calls, which is
             // ordinary. The tool layer turns nil into its own "check documents_list".
@@ -158,7 +160,7 @@ public struct ScriptingBridgePageStore: PageStore {
     /// Reads a document back after a write, so a receipt describes what Pages ended up
     /// with rather than what was asked for.
     private func reread(_ identifier: String) async throws -> DocumentDetail {
-        guard let document = try await fetch(identifier: identifier, includePageTexts: false)
+        guard let document = try await fetch(identifier: identifier, pages: nil)
         else { throw ToolError.notFound(identifier: identifier) }
         return document
     }

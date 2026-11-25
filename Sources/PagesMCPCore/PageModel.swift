@@ -47,8 +47,8 @@ public struct DocumentDetail: Sendable, Equatable {
     /// here there is no "ask for the markup instead" option at all, because Pages'
     /// scripting dictionary exposes no string form of the formatting.
     public let bodyText: String
-    /// One plain-text string per page, in document order. `nil` means "not requested",
-    /// a different fact from "the document has one empty page".
+    /// One plain-text string per page that was asked for, in document order. `nil` means
+    /// "not requested", a different fact from "the document has one empty page".
     public let pageTexts: [String]?
 
     public init(summary: DocumentSummary, bodyText: String, pageTexts: [String]? = nil) {

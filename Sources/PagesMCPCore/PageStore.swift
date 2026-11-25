@@ -42,9 +42,11 @@ public protocol PageStore: Sendable {
     /// open, so there is nothing to search — only what is already on screen.
     func documents() async throws -> [DocumentSummary]
 
-    /// `includePageTexts` is opt-in: it is one Apple event per page on top of the one for
-    /// the whole body, and most callers only want the body.
-    func fetch(identifier: String, includePageTexts: Bool) async throws -> DocumentDetail?
+    /// `pages` is opt-in: it is one Apple event per page on top of the one for the whole
+    /// body, and most callers only want the body. When given, `pageTexts` holds the text of
+    /// the pages in that range that exist, numbered from one, in document order: the range
+    /// may run past the last page, and a range that starts past it yields no page at all.
+    func fetch(identifier: String, pages: ClosedRange<Int>?) async throws -> DocumentDetail?
 
     /// Every installed template's display name, for resolving `create`'s `templateName`
     /// and for naming what actually exists when a caller asks for one that doesn't.

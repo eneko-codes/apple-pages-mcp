@@ -6,9 +6,8 @@ import Foundation
 /// destructive ones are visible at a glance in the switch list.
 public enum ToolCatalog {
 
-    /// Names are constants rather than being read back off a `Tool`, because a tool whose
-    /// schema depends on the configuration has to be built as a function and its name
-    /// would then have nowhere stable to live.
+    /// Names are constants rather than being read back off a `Tool`, so that the dispatch
+    /// and the tests name a tool without building its schema.
     public static let statusName = "pages_status"
     public static let documentsListName = "documents_list"
     public static let getName = "document_get"
@@ -22,13 +21,30 @@ public enum ToolCatalog {
     /// The verbs a write tool may begin with.
     static let writeVerbs = ["create_", "open_", "update_", "save_", "close_", "export_"]
 
-    /// Built from the live configuration so a description never states a limit the
-    /// running server does not actually enforce.
-    public static func all(_ configuration: Configuration = Configuration()) -> [Tool] {
-        [
-            status, documentsList, get(configuration), create, open, update, save, close,
-            export,
-        ]
+    // Sizes. The schemas, the descriptions and the server instructions quote these by
+    // interpolation, so a bound the model reads is always the one the code enforces.
+
+    public static let offsetRange = 0...10_000_000
+
+    /// A page of open documents. A row is a name, three short facts and an id, about 100
+    /// characters, so the maximum fits `ToolStandard.longestResult` even when every name is
+    /// as long as a file name may be, and the default is well inside
+    /// `ToolStandard.usualPage`. `BoundsTests` renders both to hold them to that.
+    public static let documentLimitRange = 1...100
+    public static let defaultDocumentLimit = 25
+
+    /// The window on a document's text. The maximum is half the longest result, so a
+    /// window of ordinary text leaves room for what Pages reports about the document;
+    /// `ToolStandard.fitting` shrinks one whose characters take more UTF-16 units than that.
+    public static let maxCharactersRange = 1...(ToolStandard.longestResult / 2)
+    public static let defaultMaxCharacters = ToolStandard.usualPage
+
+    /// Pages are numbered from one. The last one is the document's own page count, which
+    /// only the document can say, so the code moves a page number into 1 to that count.
+    public static let firstPageNumber = 1
+
+    public static func all() -> [Tool] {
+        [status, documentsList, get, create, open, update, save, close, export]
     }
 
     // MARK: Schema helpers
@@ -60,12 +76,22 @@ public enum ToolCatalog {
         ])
     }
 
-    private static func integer(_ description: String, minimum: Int, maximum: Int, default def: Int)
+    private static func integer(_ description: String, range: ClosedRange<Int>, default def: Int)
         -> Value
     {
         .object([
             "type": .string("integer"), "description": .string(description),
-            "minimum": .int(minimum), "maximum": .int(maximum), "default": .int(def),
+            "minimum": .int(range.lowerBound), "maximum": .int(range.upperBound),
+            "default": .int(def),
+        ])
+    }
+
+    /// A page number. It states no maximum and no default: the last page is the document's
+    /// own count, and leaving both page arguments out means the body, not page one.
+    private static func pageNumber(_ description: String) -> Value {
+        .object([
+            "type": .string("integer"), "description": .string(description),
+            "minimum": .int(firstPageNumber),
         ])
     }
 
@@ -135,7 +161,8 @@ public enum ToolCatalog {
         title: "Pages availability and settings",
         description: """
             Reports whether Pages is running, whether this server may automate it, and \
-            what limits are in force. Touches no document.
+            the sizes in force: the window document_get reads, the page documents_list \
+            returns, the longest result and the deadline of a call. Touches no document.
 
             Use it when another Pages tool fails, or when setting the server up.
             """,
@@ -148,51 +175,78 @@ public enum ToolCatalog {
         name: documentsListName,
         title: "List open documents",
         description: """
-            Lists every document currently open in Pages, with its page count and \
-            whether it has unsaved changes.
+            Lists the documents open in Pages, \(defaultDocumentLimit) to a page in name \
+            order, each with its page count, whether it was never saved or has unsaved \
+            changes, and the id the other tools take. When more are open than the page \
+            holds, the first lines of the result say how many there are and the offset of \
+            the next page: pass limit (up to \(documentLimitRange.upperBound)) and offset.
 
             Pages has no library the way Notes has folders: this is the whole of what \
             can be asked about without opening something first. A file that is not \
             open yet does not appear here — call open_document for that.
             """,
-        inputSchema: object(properties: [:]),
+        inputSchema: object(properties: [
+            "limit": integer(
+                "Maximum number of documents in one page.", range: documentLimitRange,
+                default: defaultDocumentLimit),
+            "offset": integer(
+                """
+                Number of documents to skip. A result that does not hold every document \
+                says, in its first lines, the offset to pass for the next page.
+                """, range: offsetRange, default: 0),
+        ]),
         annotations: .init(
             readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false)
     )
 
-    static func get(_ configuration: Configuration) -> Tool {
-        Tool(
-            name: getName,
-            title: "Read one open document",
-            description: """
-                Returns one open document's body text, page/section/table/image/chart \
-                counts, and whether it is password protected.
+    static let get = Tool(
+        name: getName,
+        title: "Read one open document",
+        description: """
+            Returns one open document: its path, its page, section, table, image and chart \
+            counts, and the first \(defaultMaxCharacters) characters of its body as plain \
+            text. When the body is longer, the first lines of the result say how long it \
+            is and the character_offset that returns the rest; max_characters (up to \
+            \(maxCharactersRange.upperBound)) sets the size of one window.
 
-                Text is cut at \(configuration.bodyTextLimit) characters unless \
-                'text_limit' says otherwise, and the response says when it was cut. Pass \
-                'by_page'=true to also get one plain-text string per page — one extra \
-                Apple event per page, so only ask when the per-page breakdown actually \
-                matters. A password-protected document reports that it is locked \
-                instead of returning empty text.
-                """,
-            inputSchema: object(
-                properties: [
-                    "id": string(idHelp),
-                    "by_page": boolean(
-                        "Also return the body broken down one plain-text string per page.",
-                        default: false),
-                    "text_limit": integer(
-                        "Maximum characters of body text to return.",
-                        minimum: Configuration.bodyTextLimitRange.lowerBound,
-                        maximum: Configuration.bodyTextLimitRange.upperBound,
-                        default: configuration.bodyTextLimit),
-                ],
-                required: ["id"]),
-            annotations: .init(
-                readOnlyHint: true, destructiveHint: false, idempotentHint: true,
-                openWorldHint: false)
-        )
-    }
+            Pass first_page and last_page (numbered from \(firstPageNumber), both included; \
+            one alone runs to the end of the document) to get the text of those pages \
+            instead of the body, each under a [page N] heading, through the same window. \
+            Every page read is one more Apple event on every call, so ask for a few pages \
+            at a time. A page number past the last page is moved to it, and the first \
+            lines say so; a last_page before first_page is refused.
+
+            The text is plain: Pages has no scriptable form of its formatting. A \
+            password-protected document reports that it is locked instead of returning \
+            empty text.
+            """,
+        inputSchema: object(
+            properties: [
+                "id": string(idHelp),
+                "character_offset": integer(
+                    """
+                    Number of characters of the text to skip. A result that does not hold \
+                    all of it says, in its first lines, the value to pass for the rest.
+                    """, range: offsetRange, default: 0),
+                "max_characters": integer(
+                    "The most characters of the text to return.", range: maxCharactersRange,
+                    default: defaultMaxCharacters),
+                "first_page": pageNumber(
+                    """
+                    Return the text of the pages from this one on, instead of the body. \
+                    Without last_page it runs to the last page.
+                    """),
+                "last_page": pageNumber(
+                    """
+                    Return the text of the pages up to and including this one, instead of \
+                    the body. Without first_page it starts at page \(firstPageNumber).
+                    """),
+            ],
+            required: ["id"]),
+        annotations: .init(
+            readOnlyHint: true, destructiveHint: false, idempotentHint: true,
+            openWorldHint: false)
+    )
 
     // MARK: Writes
 
@@ -226,8 +280,9 @@ public enum ToolCatalog {
         name: openName,
         title: "Open an existing document",
         description: """
-            Opens the Pages document at 'path'. Returns the same detail document_get \
-            would, so a separate call is not needed right after.
+            Opens the Pages document at 'path' and returns its name, path, page count \
+            and the id the other tools take. It does not return the text: read that with \
+            document_get.
 
             If the file is password protected, Pages shows its own password prompt and \
             this call will block until someone answers it in the Pages window itself — \

@@ -18,7 +18,9 @@ Do not open, read, modify, save over, or close-with-saving a document the owner 
 
 A local MCP server (Swift 6, stdio transport) exposing the macOS Pages app through Apple events. No network, no credential, no cloud API — iCloud is only the sync engine, gated by TCC consent for Automation. Pages must already be running; this server never launches it. **No third-party dependency**: `Package.swift` lists none, and the MCP protocol (JSON-RPC over stdio) is `MCPServer.swift` over Foundation. Adding a package needs the owner's say-so.
 
-**`MCPServer.swift`, `Value.swift` and `Tests/…/MCPProtocolTests.swift` are copied unchanged into every one of the owner's MCP servers** (the test file differs only in its `@testable import`). A change to one is made to every copy in the same piece of work; never let a copy drift.
+**`MCPServer.swift`, `Value.swift`, `ToolStandard.swift` and the tests `MCPProtocolTests.swift` and `ToolStandardTests.swift` are copied unchanged into every one of the owner's MCP servers** (the test files differ only in their `@testable import`). A change to one is made to every copy in the same piece of work; never let a copy drift.
+
+`ToolStandard.swift` holds what every tool here must keep to: the longest result, description and error, the time a call may take, the fixed wording of each notice that says what a result left out (`Notice`), and the guard `MCPServer.swift` passes every result through. A tool bounds its own result and says how to get the rest; the guard only catches the one that forgot.
 
 The App Store lists the app as **"Pages Creator Studio"** — verified to be the same app: `CFBundleIdentifier` is `com.apple.Pages`, Apple-signed, and its scripting dictionary is titled "Pages Terminology" with the standard iWork suites. Treat the two names as one app throughout this repo; the display name is what shows in permission dialogs and System Settings, not the bundle identifier this code keys on.
 
@@ -136,6 +138,8 @@ otool -P .build/release/apple-pages-mcp | grep NSAppleEventsUsageDescription
 **Apple silicon only, deliberately.** `scripts/pack.sh` builds for arm64 alone — a plain `swift build -c release`, no `--arch` flags — and fails if the binary
 holds any other architecture. A universal build doubles the bundle for an architecture
 macOS 26 is the last release to support. Do not add an x86_64 slice back.
+
+**How a tool keeps to the tool standard here.** Sizes are constants in `ToolCatalog`, and the schemas, the descriptions and the instructions quote them by interpolation, never as literals. `Arguments.int` moves a quantity (`limit`, `offset`, a window) into its range and collects the sentence that says so in `notices`; a value of the wrong type is refused, a flag included, because `saving` read as false would discard changes. `documents_list` sorts the open documents by name and then id, an order it states, and goes through `ToolStandard.page`, which puts the notices and the page's position (`Notice.page`) before the data. `document_get` windows one text with `ToolStandard.window`: the body, or the listing of the pages `first_page` to `last_page`, which `PageTools.get` moves into the document's own page count with `ToolStandard.clamp` once it has been read. Both render through `ToolStandard.fitting`, which halves a page or a window whose text would still be longer than a result may be, so a tool never leans on the guard. An error repeats a caller's text only through `ToolStandard.echo`, and the messages `PagesBridge.m` words repeat none. Every call runs inside `Deadline.run`, which abandons it at `PageTools.defaultTimeout`. `BoundsTests` holds every bound, notice and length to this.
 
 ## Diagnostics
 

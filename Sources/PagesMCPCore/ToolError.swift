@@ -9,7 +9,30 @@ public enum ToolError: Error, Equatable {
     case documentPasswordProtected(name: String, action: String)
     case neverSaved(name: String, action: String)
     case confirmationRequired(action: String)
+    case unknownTool(String)
+    case timedOut(seconds: Int)
     case storeFailure(String)
+
+    /// How many template names an error lists. A Mac has about a hundred installed, and an
+    /// error is no place for all of them.
+    static let candidateCount = 8
+
+    /// `available` with the names that share the most words with `name` first, then in
+    /// alphabetical order, so that the few an error shows are the likeliest ones meant.
+    static func closest(to name: String, among available: [String]) -> [String] {
+        let words = Set(
+            name.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init))
+        func shared(_ candidate: String) -> Int {
+            let folded = candidate.lowercased()
+            return words.filter { folded.contains($0) }.count
+        }
+        return available.sorted { first, second in
+            let (firstShared, secondShared) = (shared(first), shared(second))
+            if firstShared != secondShared { return firstShared > secondShared }
+            let order = first.localizedCaseInsensitiveCompare(second)
+            return order == .orderedSame ? first < second : order == .orderedAscending
+        }
+    }
 
     public var message: String {
         switch self {
@@ -24,7 +47,7 @@ public enum ToolError: Error, Equatable {
 
         case .notFound(let identifier):
             return """
-                No open document has the id '\(identifier)'.
+                No open document has the id '\(ToolStandard.echo(identifier))'.
 
                 Pages only knows about documents open right now — there is no library to \
                 search the way Notes has folders. Call documents_list to see what is \
@@ -37,13 +60,25 @@ public enum ToolError: Error, Equatable {
                 """
 
         case .templateNotFound(let name, let available):
-            let list = available.isEmpty ? "(none found)" : available.joined(separator: ", ")
+            let shown = Self.closest(to: name, among: available).prefix(Self.candidateCount)
+            let others = available.count - shown.count
+            let list: String
+            if available.isEmpty {
+                list = "Pages reported no installed template."
+            } else if others == 0 {
+                list = "Templates installed: \(shown.joined(separator: ", "))."
+            } else {
+                list =
+                    "The closest \(shown.count) of the \(available.count) installed: "
+                    + "\(shown.joined(separator: ", ")), and \(others) others."
+            }
             return """
-                No template '\(name)'.
+                No template '\(ToolStandard.echo(name))'.
 
-                Templates installed: \(list)
+                \(list)
 
-                Matching ignores case but nothing else.
+                Matching ignores case but nothing else. The template chooser in Pages \
+                (File > New) shows every name; leave 'template' out for a blank document.
                 """
 
         case .documentPasswordProtected(let name, let action):
@@ -71,6 +106,24 @@ public enum ToolError: Error, Equatable {
 
                 This would overwrite a file on disk, and this server cannot undo that. \
                 Call again with confirm=true only if you really mean it.
+                """
+
+        case .unknownTool(let name):
+            return "'\(ToolStandard.echo(name))' is not a tool of this server."
+
+        case .timedOut(let seconds):
+            return """
+                The call did not finish within \(seconds) seconds and was abandoned.
+
+                Pages may be busy, or showing a dialog that waits for someone at the \
+                keyboard. An Apple event already sent cannot be recalled, so a create, \
+                update, save, close or export may still take effect: check with \
+                documents_list or document_get before repeating one.
+
+                A read changed nothing. document_get does less work with a narrower \
+                first_page to last_page range, or with neither, which reads the body in \
+                one event. documents_list reads every open document whatever its limit, \
+                so it cannot be narrowed, only tried again.
                 """
 
         case .storeFailure(let detail):

@@ -86,8 +86,12 @@ System Settings → Privacy & Security → Automation → apple-pages-mcp → en
 Plain ad-hoc signing still has no *designated requirement*, so TCC falls back to the binary's hash — and every rebuild produces a new hash, so every rebuild loses the grant. To make a grant durable across rebuilds, sign with a real identity:
 
 ```bash
-MCPB_SIGN_IDENTITY="Apple Development: Your Name (TEAMID)" bash scripts/pack.sh
+security find-identity -v -p codesigning   # copy the 40-character hash of an Apple Development or Developer ID Application identity
+MCPB_SIGN_IDENTITY="<identity hash>" bash scripts/pack.sh
 ```
+
+Pass the hash, not the certificate's name: `pack.sh` prints the identity it signs with,
+and the name is yours.
 
 ### Preparing something to distribute
 
